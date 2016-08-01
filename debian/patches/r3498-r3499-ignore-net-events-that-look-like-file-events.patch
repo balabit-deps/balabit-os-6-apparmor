@@ -1,0 +1,60 @@
+Subject: logparser.py: ignore network events with 'send receive'
+Origin: commit, http://bazaar.launchpad.net/~apparmor-dev/apparmor/master/revision/3498
+Origin: commit, http://bazaar.launchpad.net/~apparmor-dev/apparmor/master/revision/3499
+Author: Christian Boltz <apparmor@cboltz.de>
+Bug-Ubuntu: https://bugs.launchpad.net/apparmor/+bug/1577051/comments/13
+Last-Update: 2016-07-31
+
+=== added file 'libraries/libapparmor/testsuite/test_multi/testcase_network_send_receive.err'
+=== added file 'libraries/libapparmor/testsuite/test_multi/testcase_network_send_receive.in'
+--- old/libraries/libapparmor/testsuite/test_multi/testcase_network_send_receive.in	1970-01-01 00:00:00 +0000
++++ new/libraries/libapparmor/testsuite/test_multi/testcase_network_send_receive.in	2016-07-29 22:41:43 +0000
+@@ -0,0 +1,1 @@
++Jul 29 11:42:05 files kernel: [483212.877816] audit: type=1400 audit(1469785325.122:21021): apparmor="ALLOWED" operation="file_inherit" profile="/usr/bin/nginx-amplify-agent.py//null-/bin/dash" pid=18239 comm="sh" laddr=192.168.10.3 lport=50758 faddr=54.153.70.241 fport=443 family="inet" sock_type="stream" protocol=6 requested_mask="send receive" denied_mask="send receive"
+
+=== added file 'libraries/libapparmor/testsuite/test_multi/testcase_network_send_receive.out'
+--- old/libraries/libapparmor/testsuite/test_multi/testcase_network_send_receive.out	1970-01-01 00:00:00 +0000
++++ new/libraries/libapparmor/testsuite/test_multi/testcase_network_send_receive.out	2016-07-29 22:41:43 +0000
+@@ -0,0 +1,19 @@
++START
++File: testcase_network_send_receive.in
++Event type: AA_RECORD_ALLOWED
++Audit ID: 1469785325.122:21021
++Operation: file_inherit
++Mask: send receive
++Denied Mask: send receive
++Profile: /usr/bin/nginx-amplify-agent.py//null-/bin/dash
++Command: sh
++PID: 18239
++Network family: inet
++Socket type: stream
++Protocol: tcp
++Local addr: 192.168.10.3
++Foreign addr: 54.153.70.241
++Local port: 50758
++Foreign port: 443
++Epoch: 1469785325
++Audit subid: 21021
+
+=== modified file 'utils/apparmor/logparser.py'
+--- old/utils/apparmor/logparser.py	2016-06-05 18:06:43 +0000
++++ new/utils/apparmor/logparser.py	2016-07-31 15:13:57 +0000
+@@ -133,7 +133,7 @@
+         ev['denied_mask'] = event.denied_mask
+         ev['request_mask'] = event.requested_mask
+         ev['magic_token'] = event.magic_token
+-        if ev['operation'] and self.op_type(ev['operation']) == 'net':
++        if ev['operation'] and (self.op_type(ev['operation']) == 'net' or event.net_protocol):
+             ev['family'] = event.net_family
+             ev['protocol'] = event.net_protocol
+             ev['sock_type'] = event.net_sock_type
+@@ -298,7 +298,7 @@
+             # sometimes network events come with an e['operation'] that matches the list of file operations
+             # see https://bugs.launchpad.net/apparmor/+bug/1577051 and https://bugs.launchpad.net/apparmor/+bug/1582374
+             # XXX these events are network events, so we should map them as such
+-            if e['request_mask'] in ('send', 'receive'):
++            if 'send' in e['request_mask'] or 'receive' in e['request_mask']:
+                 self.debug_logger.debug('UNHANDLED (request_mask is send or receive): %s' % e)
+                 return None
+ 
+

@@ -1,0 +1,26 @@
+Description: Allow dbus-user-session D-Bus path
+ .
+ https://launchpad.net/bugs/1604872
+ .
+ dbus-user-session uses the file based Unix socket in $XDG_RUNTIME_DIR/bus.
+ Extend the dbus-session-strict abstraction to also allow that.
+ .
+ Acked-by: Tyler Hicks <tyhicks@canonical.com>
+Origin: commit, revision id: tyhicks@canonical.com-20160727034951-q47sorta6uz91nyh
+Author: Martin Pitt <martin.pitt@ubuntu.com>
+Bug: https://launchpad.net/bugs/1604872
+Last-Update: 2016-07-27
+X-Bzr-Revision-Id: tyhicks@canonical.com-20160727034951-q47sorta6uz91nyh
+
+=== modified file 'profiles/apparmor.d/abstractions/dbus-session-strict'
+--- old/profiles/apparmor.d/abstractions/dbus-session-strict	2016-05-11 23:01:41 +0000
++++ new/profiles/apparmor.d/abstractions/dbus-session-strict	2016-07-27 03:49:51 +0000
+@@ -12,6 +12,7 @@
+   # unique per-machine identifier
+   /etc/machine-id r,
+   /var/lib/dbus/machine-id r,
++  owner /run/user/*/bus rw,
+ 
+   unix (connect, receive, send)
+        type=stream
+

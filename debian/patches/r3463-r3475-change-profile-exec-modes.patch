@@ -1,0 +1,1639 @@
+Subject: Adjust change_profile rule syntax to accept an exec mode
+ The purpose of this patch set is to modify the change_profile rule syntax
+ to allow the policy author to specify if AT_SECURE in the kernel's
+ auxiliary vector should be set (see the getauxval man page for details).
+ The AT_SECURE value determines if libc will scrub the newly executed
+ program's environment.
+Origin: upstream, https://bazaar.launchpad.net/~apparmor-dev/apparmor/master/revision/3463
+Origin: upstream, https://bazaar.launchpad.net/~apparmor-dev/apparmor/master/revision/3464
+Origin: upstream, https://bazaar.launchpad.net/~apparmor-dev/apparmor/master/revision/3465
+Origin: upstream, https://bazaar.launchpad.net/~apparmor-dev/apparmor/master/revision/3466
+Origin: upstream, https://bazaar.launchpad.net/~apparmor-dev/apparmor/master/revision/3467
+Origin: upstream, https://bazaar.launchpad.net/~apparmor-dev/apparmor/master/revision/3468
+Origin: upstream, https://bazaar.launchpad.net/~apparmor-dev/apparmor/master/revision/3469
+Origin: upstream, https://bazaar.launchpad.net/~apparmor-dev/apparmor/master/revision/3470
+Origin: upstream, https://bazaar.launchpad.net/~apparmor-dev/apparmor/master/revision/3471
+Origin: upstream, https://bazaar.launchpad.net/~apparmor-dev/apparmor/master/revision/3472
+Origin: upstream, https://bazaar.launchpad.net/~apparmor-dev/apparmor/master/revision/3473
+Origin: upstream, https://bazaar.launchpad.net/~apparmor-dev/apparmor/master/revision/3474
+Origin: upstream, https://bazaar.launchpad.net/~apparmor-dev/apparmor/master/revision/3475
+Bug-Ubuntu: https://launchpad.net/bugs/1584069
+Author: John Johansen <john.johansen@canonical.com>
+Author: Christian Boltz <apparmor@cboltz.de>
+Author: Tyler Hicks <tyhicks@canonical.com>
+Last-Update: 2016-05-31
+
+=== modified file 'parser/apparmor.d.pod'
+--- old/parser/apparmor.d.pod	2016-05-22 12:51:19 +0000
++++ new/parser/apparmor.d.pod	2016-05-31 20:38:36 +0000
+@@ -277,7 +277,9 @@
+ 
+ B<ALPHANUMERIC> = ('0', '1', '2', ... '9', 'a', 'b', 'c', ... 'z', 'A', 'B', ... 'Z')
+ 
+-B<CHANGE_PROFILE RULE> = 'change_profile' [ I<EXEC COND> ] [ '-E<gt>' I<PROFILE NAME> ]
++B<CHANGE_PROFILE RULE> = 'change_profile' [ [ I<EXEC MODE> ] I<EXEC COND> ] [ '-E<gt>' I<PROFILE NAME> ]
++
++B<EXEC_MODE> = ( 'safe' | 'unsafe' )
+ 
+ B<EXEC COND> = I<FILEGLOB>
+ 
+@@ -1208,6 +1210,20 @@
+   /bin/bash Px -> new_profile1,
+   change_profile /bin/bash -> {new_profile1,new_profile2,new_profile3},
+ 
++The exec mode dictates whether or not the Linux Kernel's B<unsafe_exec>
++routines should be used to scrub the environment, similar to setuid programs.
++(See ld.so(8) for some information on setuid/setgid environment scrubbing.) The
++B<safe> mode sets up environment scrubbing to occur when the new application is
++executed and B<unsafe> mode disables AppArmor's requirement for environment
++scrubbing (the kernel and/or libc may still require environment scrubbing). An
++exec mode can only be specified when an exec condition is present.
++
++  change_profile safe /bin/bash -> new_profile,
++
++Not all kernels support B<safe> mode and the parser will downgrade rules to
++B<unsafe> mode in that situation. If no exec mode is specified, the default is
++B<safe> mode in kernels that support it.
++
+ =head2 rlimit rules
+ 
+ AppArmor can set and control the resource limits associated with a
+
+=== modified file 'parser/parser_lex.l'
+--- old/parser/parser_lex.l	2016-03-18 22:28:51 +0000
++++ new/parser/parser_lex.l	2016-05-31 20:38:36 +0000
+@@ -239,6 +239,7 @@
+ 
+ /* IF adding new state please update state_names table at eof */
+ %x SUB_ID
++%x SUB_ID_WS
+ %x SUB_VALUE
+ %x EXTCOND_MODE
+ %x EXTCONDLIST_MODE
+@@ -268,7 +269,7 @@
+ 	}
+ %}
+ 
+-<INITIAL,INCLUDE,LIST_VAL_MODE,EXTCOND_MODE,LIST_COND_VAL,LIST_COND_PAREN_VAL,LIST_COND_MODE,EXTCONDLIST_MODE,ASSIGN_MODE,NETWORK_MODE,CHANGE_PROFILE_MODE,RLIMIT_MODE,MOUNT_MODE,DBUS_MODE,SIGNAL_MODE,PTRACE_MODE,UNIX_MODE>{
++<INITIAL,SUB_ID_WS,INCLUDE,LIST_VAL_MODE,EXTCOND_MODE,LIST_COND_VAL,LIST_COND_PAREN_VAL,LIST_COND_MODE,EXTCONDLIST_MODE,ASSIGN_MODE,NETWORK_MODE,CHANGE_PROFILE_MODE,RLIMIT_MODE,MOUNT_MODE,DBUS_MODE,SIGNAL_MODE,PTRACE_MODE,UNIX_MODE>{
+ 	{WS}+	{  DUMP_PREPROCESS; /* Ignoring whitespace */ }
+ }
+ 
+@@ -321,7 +322,7 @@
+ 	}
+ }
+ 
+-<SUB_ID>{
++<SUB_ID,SUB_ID_WS>{
+ 	({IDS}|{QUOTED_ID}) {
+ 		/* Go into separate state to match generic ID strings */
+ 		yylval.id =  processid(yytext, yyleng);
+@@ -439,7 +440,16 @@
+ }
+ 
+ <CHANGE_PROFILE_MODE>{
+-	{ARROW}		{ RETURN_TOKEN(TOK_ARROW); }
++	safe		{ RETURN_TOKEN(TOK_SAFE); }
++	unsafe		{ RETURN_TOKEN(TOK_UNSAFE); }
++
++	{ARROW} {
++		/**
++		 * Push state so that we can return TOK_ID even when the
++		 * change_profile target is 'safe' or 'unsafe'.
++		 */
++		PUSH_AND_RETURN(SUB_ID_WS, TOK_ARROW);
++	}
+ 
+ 	({IDS}|{QUOTED_ID}) {
+ 		yylval.id = processid(yytext, yyleng);
+@@ -632,7 +642,7 @@
+ 	}
+ }
+ 
+-<INITIAL,SUB_ID,SUB_VALUE,LIST_VAL_MODE,EXTCOND_MODE,LIST_COND_VAL,LIST_COND_PAREN_VAL,LIST_COND_MODE,EXTCONDLIST_MODE,ASSIGN_MODE,NETWORK_MODE,CHANGE_PROFILE_MODE,MOUNT_MODE,DBUS_MODE,SIGNAL_MODE,PTRACE_MODE,UNIX_MODE>{
++<INITIAL,SUB_ID,SUB_ID_WS,SUB_VALUE,LIST_VAL_MODE,EXTCOND_MODE,LIST_COND_VAL,LIST_COND_PAREN_VAL,LIST_COND_MODE,EXTCONDLIST_MODE,ASSIGN_MODE,NETWORK_MODE,CHANGE_PROFILE_MODE,MOUNT_MODE,DBUS_MODE,SIGNAL_MODE,PTRACE_MODE,UNIX_MODE>{
+ 	[^\n]	{
+ 		DUMP_PREPROCESS;
+ 		/* Something we didn't expect */
+@@ -647,6 +657,7 @@
+ unordered_map<int, string> state_names = {
+ 	STATE_TABLE_ENT(INITIAL),
+ 	STATE_TABLE_ENT(SUB_ID),
++	STATE_TABLE_ENT(SUB_ID_WS),
+ 	STATE_TABLE_ENT(SUB_VALUE),
+ 	STATE_TABLE_ENT(EXTCOND_MODE),
+ 	STATE_TABLE_ENT(EXTCONDLIST_MODE),
+
+=== modified file 'parser/parser_regex.c'
+--- old/parser/parser_regex.c	2016-03-18 22:28:51 +0000
++++ new/parser/parser_regex.c	2016-05-31 20:32:08 +0000
+@@ -494,6 +494,23 @@
+ 
+ static int warn_change_profile = 1;
+ 
++static bool is_change_profile_mode(int mode)
++{
++	/**
++	 * A change_profile entry will have the AA_CHANGE_PROFILE bit set.
++	 * It could also have the (AA_EXEC_BITS | ALL_AA_EXEC_UNSAFE) bits
++	 * set by the frontend parser. That means that it is incorrect to
++	 * identify change_profile modes using a test like this:
++	 *
++	 *   (mode & ~AA_CHANGE_PROFILE)
++	 *
++	 * The above test would incorrectly return true on a
++	 * change_profile mode that has the
++	 * (AA_EXEC_BITS | ALL_AA_EXEC_UNSAFE) bits set.
++	 */
++	return mode & AA_CHANGE_PROFILE;
++}
++
+ static int process_dfa_entry(aare_rules *dfarules, struct cod_entry *entry)
+ {
+ 	std::string tbuf;
+@@ -504,7 +521,7 @@
+ 		return TRUE;
+ 
+ 
+-	if (entry->mode & ~AA_CHANGE_PROFILE)
++	if (!is_change_profile_mode(entry->mode))
+ 		filter_slashes(entry->name);
+ 	ptype = convert_aaregex_to_pcre(entry->name, 0, glob_default, tbuf, &pos);
+ 	if (ptype == ePatternInvalid)
+@@ -530,13 +547,14 @@
+ 	 * TODO: split link and change_profile entries earlier
+ 	 */
+ 	if (entry->deny) {
+-		if ((entry->mode & ~(AA_LINK_BITS | AA_CHANGE_PROFILE)) &&
++		if ((entry->mode & ~AA_LINK_BITS) &&
++		    !is_change_profile_mode(entry->mode) &&
+ 		    !dfarules->add_rule(tbuf.c_str(), entry->deny,
+ 					entry->mode & ~(AA_LINK_BITS | AA_CHANGE_PROFILE),
+ 					entry->audit & ~(AA_LINK_BITS | AA_CHANGE_PROFILE),
+ 					dfaflags))
+ 			return FALSE;
+-	} else if (entry->mode & ~AA_CHANGE_PROFILE) {
++	} else if (!is_change_profile_mode(entry->mode)) {
+ 		if (!dfarules->add_rule(tbuf.c_str(), entry->deny, entry->mode,
+ 					entry->audit, dfaflags))
+ 			return FALSE;
+@@ -563,12 +581,13 @@
+ 		if (!dfarules->add_rule_vec(entry->deny, perms, entry->audit & AA_LINK_BITS, 2, vec, dfaflags))
+ 			return FALSE;
+ 	}
+-	if (entry->mode & AA_CHANGE_PROFILE) {
++	if (is_change_profile_mode(entry->mode)) {
+ 		const char *vec[3];
+ 		std::string lbuf, xbuf;
+ 		autofree char *ns = NULL;
+ 		autofree char *name = NULL;
+ 		int index = 1;
++		uint32_t onexec_perms = AA_ONEXEC;
+ 
+ 		if ((warnflags & WARN_RULE_DOWNGRADED) && entry->audit && warn_change_profile) {
+ 			/* don't have profile name here, so until this code
+@@ -610,12 +629,23 @@
+ 		}
+ 
+ 		/* regular change_profile rule */
+-		if (!dfarules->add_rule_vec(entry->deny, AA_CHANGE_PROFILE | AA_ONEXEC, 0, index - 1, &vec[1], dfaflags))
++		if (!dfarules->add_rule_vec(entry->deny,
++					    AA_CHANGE_PROFILE | onexec_perms,
++					    0, index - 1, &vec[1], dfaflags))
+ 			return FALSE;
++
+ 		/* onexec rules - both rules are needed for onexec */
+-		if (!dfarules->add_rule_vec(entry->deny, AA_ONEXEC, 0, 1, vec, dfaflags))
++		if (!dfarules->add_rule_vec(entry->deny, onexec_perms,
++					    0, 1, vec, dfaflags))
+ 			return FALSE;
+-		if (!dfarules->add_rule_vec(entry->deny, AA_ONEXEC, 0, index, vec, dfaflags))
++
++		/**
++		 * pick up any exec bits, from the frontend parser, related to
++		 * unsafe exec transitions
++		 */
++		onexec_perms |= (entry->mode & (AA_EXEC_BITS | ALL_AA_EXEC_UNSAFE));
++		if (!dfarules->add_rule_vec(entry->deny, onexec_perms,
++					    0, index, vec, dfaflags))
+ 			return FALSE;
+ 	}
+ 	return TRUE;
+
+=== modified file 'parser/parser_yacc.y'
+--- old/parser/parser_yacc.y	2016-03-18 22:28:51 +0000
++++ new/parser/parser_yacc.y	2016-05-31 20:38:36 +0000
+@@ -69,6 +69,10 @@
+ 
+ #define CAP_TO_MASK(x) (1ull << (x))
+ 
++#define EXEC_MODE_EMPTY		0
++#define EXEC_MODE_UNSAFE	1
++#define EXEC_MODE_SAFE		2
++
+ int parser_token = 0;
+ 
+ struct cod_entry *do_file_rule(char *id, int mode, char *link_id, char *nt);
+@@ -241,7 +245,6 @@
+ %type <flags>	flagval
+ %type <cap>	caps
+ %type <cap>	capability
+-%type <id>	change_profile_head
+ %type <user_entry> change_profile
+ %type <set_var> TOK_SET_VAR
+ %type <bool_var> TOK_BOOL_VAR
+@@ -276,7 +279,7 @@
+ %type <unix_entry>	unix_rule
+ %type <id>	opt_target
+ %type <id>	opt_named_transition
+-%type <boolean> opt_unsafe
++%type <boolean> opt_exec_mode
+ %type <boolean> opt_file
+ %%
+ 
+@@ -1060,9 +1063,9 @@
+ rule: file_rule { $$ = $1; }
+ 	| link_rule { $$ = $1; }
+ 
+-opt_unsafe: { /* nothing */ $$ = 0; }
+-	| TOK_UNSAFE { $$ = 1; };
+-	| TOK_SAFE { $$ = 2; };
++opt_exec_mode: { /* nothing */ $$ = EXEC_MODE_EMPTY; }
++	| TOK_UNSAFE { $$ = EXEC_MODE_UNSAFE; };
++	| TOK_SAFE { $$ = EXEC_MODE_SAFE; };
+ 
+ opt_file: { /* nothing */ $$ = 0; }
+ 	| TOK_FILE { $$ = 1; }
+@@ -1104,22 +1107,22 @@
+ 	| opt_file file_rule_tail { $$ = $2; }
+ 
+ 
+-file_rule_tail: opt_unsafe frule
++file_rule_tail: opt_exec_mode frule
+ 	{
+-		if ($1) {
++		if ($1 != EXEC_MODE_EMPTY) {
+ 			if (!($2->mode & AA_EXEC_BITS))
+ 				yyerror(_("unsafe rule missing exec permissions"));
+-			if ($1 == 1) {
++			if ($1 == EXEC_MODE_UNSAFE) {
+ 				$2->mode |= (($2->mode & AA_EXEC_BITS) << 8) &
+ 					 ALL_AA_EXEC_UNSAFE;
+ 			}
+-			else if ($1 == 2)
++			else if ($1 == EXEC_MODE_SAFE)
+ 				$2->mode &= ~ALL_AA_EXEC_UNSAFE;
+ 		}
+ 		$$ = $2;
+ 	};
+ 
+-file_rule_tail: opt_unsafe id_or_var file_mode id_or_var
++file_rule_tail: opt_exec_mode id_or_var file_mode id_or_var
+ 	{
+ 		/* Oopsie, we appear to be missing an EOL marker. If we
+ 		 * were *smart*, we could work around it. Since we're
+@@ -1475,28 +1478,45 @@
+ 		free($1);
+ 	}
+ 
+-change_profile_head: TOK_CHANGE_PROFILE opt_id
++change_profile: TOK_CHANGE_PROFILE opt_exec_mode opt_id opt_named_transition TOK_END_OF_RULE
+ 	{
+-		if ($2 && !($2[0] == '/' || strncmp($2, "@{", 2) == 0))
++		struct cod_entry *entry;
++		int mode = AA_CHANGE_PROFILE;
++		int exec_mode = $2;
++		char *exec = $3;
++		char *target = $4;
++
++		if (exec_mode != EXEC_MODE_EMPTY) {
++			if (!exec)
++				yyerror(_("Exec condition is required when unsafe or safe keywords are present"));
++
++			if (exec_mode == EXEC_MODE_UNSAFE) {
++				mode |= (AA_EXEC_BITS | ALL_AA_EXEC_UNSAFE);
++			} else if (exec_mode == EXEC_MODE_SAFE &&
++				   !kernel_supports_stacking &&
++				   warnflags & WARN_RULE_DOWNGRADED) {
++				pwarn("downgrading change_profile safe rule to unsafe due to lack of necessary kernel support\n");
++				/**
++				 * No need to do anything because 'unsafe' exec
++				 * mode is the only supported mode of
++				 * change_profile rules in non-stacking kernels
++				 */
++			}
++		}
++
++		if (exec && !(exec[0] == '/' || strncmp(exec, "@{", 2) == 0))
+ 			yyerror(_("Exec condition must begin with '/'."));
+-		$$ = $2;
+-	}
+-
+-change_profile: change_profile_head opt_named_transition TOK_END_OF_RULE
+-	{
+-		struct cod_entry *entry;
+-
+-		if ($2) {
+-			PDEBUG("Matched change_profile: tok_id (%s)\n", $2);
+-			entry = new_entry($2, AA_CHANGE_PROFILE, $1);
++
++		if (target) {
++			PDEBUG("Matched change_profile: tok_id (%s)\n", target);
+ 		} else {
+-			char *rule = strdup("**");
+-			if (!rule)
+-				yyerror(_("Memory allocation error."));
+-
+ 			PDEBUG("Matched change_profile,\n");
+-			entry = new_entry(rule, AA_CHANGE_PROFILE, $1);
++			target = strdup("**");
++			if (!target)
++				yyerror(_("Memory allocation error."));
+ 		}
++
++		entry = new_entry(target, mode, exec);
+ 		if (!entry)
+ 			yyerror(_("Memory allocation error."));
+ 
+
+=== added file 'parser/tst/simple_tests/change_profile/safe_bad_1.sd'
+--- old/parser/tst/simple_tests/change_profile/safe_bad_1.sd	1970-01-01 00:00:00 +0000
++++ new/parser/tst/simple_tests/change_profile/safe_bad_1.sd	2016-05-31 20:38:36 +0000
+@@ -0,0 +1,7 @@
++#
++#=DESCRIPTION change_profile w/ safe modifier but no exec condition
++#=EXRESULT FAIL
++#
++/usr/bin/foo {
++   change_profile safe,
++}
+
+=== added file 'parser/tst/simple_tests/change_profile/safe_bad_2.sd'
+--- old/parser/tst/simple_tests/change_profile/safe_bad_2.sd	1970-01-01 00:00:00 +0000
++++ new/parser/tst/simple_tests/change_profile/safe_bad_2.sd	2016-05-31 20:38:36 +0000
+@@ -0,0 +1,7 @@
++#
++#=DESCRIPTION change_profile w/ safe modifier but no exec condition
++#=EXRESULT FAIL
++#
++/usr/bin/foo {
++   change_profile safe -> baz,
++}
+
+=== added file 'parser/tst/simple_tests/change_profile/safe_ok_1.sd'
+--- old/parser/tst/simple_tests/change_profile/safe_ok_1.sd	1970-01-01 00:00:00 +0000
++++ new/parser/tst/simple_tests/change_profile/safe_ok_1.sd	2016-05-31 20:38:36 +0000
+@@ -0,0 +1,7 @@
++#
++#=DESCRIPTION change_profile w/ safe modifier
++#=EXRESULT PASS
++#
++/usr/bin/foo {
++   change_profile safe /usr/bin/bar -> baz,
++}
+
+=== added file 'parser/tst/simple_tests/change_profile/safe_ok_2.sd'
+--- old/parser/tst/simple_tests/change_profile/safe_ok_2.sd	1970-01-01 00:00:00 +0000
++++ new/parser/tst/simple_tests/change_profile/safe_ok_2.sd	2016-05-31 20:38:36 +0000
+@@ -0,0 +1,7 @@
++#
++#=DESCRIPTION change_profile w/ safe modifier
++#=EXRESULT PASS
++#
++/usr/bin/foo {
++   change_profile safe /usr/bin/bar,
++}
+
+=== added file 'parser/tst/simple_tests/change_profile/safe_ok_3.sd'
+--- old/parser/tst/simple_tests/change_profile/safe_ok_3.sd	1970-01-01 00:00:00 +0000
++++ new/parser/tst/simple_tests/change_profile/safe_ok_3.sd	2016-05-31 20:38:36 +0000
+@@ -0,0 +1,7 @@
++#
++#=DESCRIPTION change_profile w/ safe modifier and "safe" target
++#=EXRESULT PASS
++#
++/usr/bin/foo {
++   change_profile safe /usr/bin/bar -> safe,
++}
+
+=== added file 'parser/tst/simple_tests/change_profile/unsafe_bad_1.sd'
+--- old/parser/tst/simple_tests/change_profile/unsafe_bad_1.sd	1970-01-01 00:00:00 +0000
++++ new/parser/tst/simple_tests/change_profile/unsafe_bad_1.sd	2016-05-31 20:38:36 +0000
+@@ -0,0 +1,7 @@
++#
++#=DESCRIPTION change_profile w/ unsafe modifier but no exec condition
++#=EXRESULT FAIL
++#
++/usr/bin/foo {
++   change_profile unsafe,
++}
+
+=== added file 'parser/tst/simple_tests/change_profile/unsafe_bad_2.sd'
+--- old/parser/tst/simple_tests/change_profile/unsafe_bad_2.sd	1970-01-01 00:00:00 +0000
++++ new/parser/tst/simple_tests/change_profile/unsafe_bad_2.sd	2016-05-31 20:38:36 +0000
+@@ -0,0 +1,7 @@
++#
++#=DESCRIPTION change_profile w/ unsafe modifier but no exec condition
++#=EXRESULT FAIL
++#
++/usr/bin/foo {
++   change_profile unsafe -> baz,
++}
+
+=== added file 'parser/tst/simple_tests/change_profile/unsafe_ok_1.sd'
+--- old/parser/tst/simple_tests/change_profile/unsafe_ok_1.sd	1970-01-01 00:00:00 +0000
++++ new/parser/tst/simple_tests/change_profile/unsafe_ok_1.sd	2016-05-31 20:38:36 +0000
+@@ -0,0 +1,7 @@
++#
++#=DESCRIPTION change_profile w/ unsafe modifier
++#=EXRESULT PASS
++#
++/usr/bin/foo {
++   change_profile unsafe /usr/bin/bar -> baz,
++}
+
+=== added file 'parser/tst/simple_tests/change_profile/unsafe_ok_2.sd'
+--- old/parser/tst/simple_tests/change_profile/unsafe_ok_2.sd	1970-01-01 00:00:00 +0000
++++ new/parser/tst/simple_tests/change_profile/unsafe_ok_2.sd	2016-05-31 20:38:36 +0000
+@@ -0,0 +1,7 @@
++#
++#=DESCRIPTION change_profile w/ unsafe modifier
++#=EXRESULT PASS
++#
++/usr/bin/foo {
++   change_profile unsafe /usr/bin/bar,
++}
+
+=== added file 'parser/tst/simple_tests/change_profile/unsafe_ok_3.sd'
+--- old/parser/tst/simple_tests/change_profile/unsafe_ok_3.sd	1970-01-01 00:00:00 +0000
++++ new/parser/tst/simple_tests/change_profile/unsafe_ok_3.sd	2016-05-31 20:38:36 +0000
+@@ -0,0 +1,7 @@
++#
++#=DESCRIPTION change_profile w/ unsafe modifier and "unsafe" target
++#=EXRESULT PASS
++#
++/usr/bin/foo {
++   change_profile unsafe /usr/bin/bar -> unsafe,
++}
+
+=== modified file 'tests/regression/apparmor/Makefile'
+--- old/tests/regression/apparmor/Makefile	2016-03-24 16:59:11 +0000
++++ new/tests/regression/apparmor/Makefile	2016-05-28 16:58:41 +0000
+@@ -70,6 +70,7 @@
+ CFLAGS += -g -O0 -Wall -Wstrict-prototypes
+ 
+ SRC=access.c \
++    at_secure.c \
+     introspect.c \
+     changeprofile.c \
+     onexec.c \
+@@ -133,6 +134,7 @@
+     syscall_sysctl.c \
+     sysctl_proc.c \
+     tcp.c \
++    transition.c \
+     unix_fd_client.c \
+     unix_fd_server.c \
+     unix_socket.c \
+@@ -156,6 +158,7 @@
+ ************************************************************************${nl})
+ endif
+ 
++TRANSITION_CFLAGS=
+ ifdef USE_SYSTEM
+   ifneq (,$(shell pkg-config --atleast-version 2.10 libapparmor && echo TRUE))
+     SRC+=aa_policy_cache.c
+@@ -168,16 +171,16 @@
+   endif
+ 
+   ifneq (,$(shell pkg-config --atleast-version 2.10.95 libapparmor && echo TRUE))
+-    SRC+=stacking.c
+     CONDITIONAL_TESTS+=exec_stack stackonexec stackprofile
+   else
+     $(warning ${nl}\
+     ************************************************************************${nl}\
+     Skipping stacking tests: requires libapparmor 2.11 Beta 1 or newer ...${nl}\
+     ************************************************************************${nl})
++    TRANSITION_CFLAGS=-DWITHOUT_STACKING
+   endif
+ else
+-  SRC+=aa_policy_cache.c stacking.c
++  SRC+=aa_policy_cache.c
+   CONDITIONAL_TESTS+=exec_stack aa_policy_cache stackonexec stackprofile
+ endif
+ 
+@@ -185,6 +188,7 @@
+ 
+ TESTS=aa_exec \
+       access \
++      at_secure \
+       introspect \
+       capabilities \
+       changeprofile \
+@@ -263,6 +267,9 @@
+ 	cp uservars.inc.source uservars.inc
+ endif # USE_SYSTEM
+ 
++at_secure: at_secure.c transition
++	${CC} ${CFLAGS} ${LDFLAGS} $< -o $@ ${LDLIBS}
++
+ changehat_pthread: changehat_pthread.c changehat.h
+ 	${CC} ${CFLAGS} ${LDFLAGS} $< -o $@ ${LDLIBS} -pthread
+ 
+@@ -281,6 +288,9 @@
+ dbus_unrequested_reply: dbus_service dbus_unrequested_reply.c dbus_common.o
+ 	${CC} ${CFLAGS} ${LDFLAGS} $(filter-out dbus_service, $^) -o $@ ${LDLIBS} $(shell pkg-config --cflags --libs dbus-1)
+ 
++transition: transition.c
++	${CC} ${CFLAGS} ${TRANSITION_CFLAGS} ${LDFLAGS} $< -o $@ ${LDLIBS}
++
+ unix_socket_common.o: unix_socket_common.c unix_socket_common.h
+ 	${CC} ${CFLAGS} ${LDFLAGS} $< -c ${LDLIBS}
+ 
+
+=== added file 'tests/regression/apparmor/at_secure.c'
+--- old/tests/regression/apparmor/at_secure.c	1970-01-01 00:00:00 +0000
++++ new/tests/regression/apparmor/at_secure.c	2016-05-28 16:58:41 +0000
+@@ -0,0 +1,55 @@
++/**
++ * Copyright (C) 2016 Canonical, Ltd.
++ *
++ * This program is free software; you can redistribute it and/or
++ * modify it under the terms of version 2 of the GNU General Public
++ * License published by the Free Software Foundation.
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program; if not, contact Canonical Ltd.
++ */
++
++#include <errno.h>
++#include <stdio.h>
++#include <stdlib.h>
++#include <sys/auxv.h>
++
++int check_at_secure(unsigned long expected)
++{
++	unsigned long at_secure;
++
++	errno = 0;
++	at_secure = getauxval(AT_SECURE);
++	if (at_secure == 0 && errno != 0) {
++		perror("FAIL - getauxval");
++		return 1;
++	}
++
++	if (at_secure != expected) {
++		fprintf(stderr,
++			"FAIL - AT_SECURE value (%lu) did not match the expected value (%lu)\n",
++			at_secure, expected);
++		return 1;
++	}
++
++	printf("PASS\n");
++	return 0;
++}
++
++int main(int argc, char **argv)
++{
++	unsigned long expected;
++
++	if (argc != 2) {
++		fprintf(stderr, "usage: %s EXPECTED_AT_SECURE\n", argv[0]);
++		return 1;
++	}
++
++	expected = strtoul(argv[1], NULL, 10);
++	return check_at_secure(expected);
++}
+
+=== added file 'tests/regression/apparmor/at_secure.sh'
+--- old/tests/regression/apparmor/at_secure.sh	1970-01-01 00:00:00 +0000
++++ new/tests/regression/apparmor/at_secure.sh	2016-05-31 20:38:36 +0000
+@@ -0,0 +1,208 @@
++#! /bin/bash
++#	Copyright (C) 2016 Canonical, Ltd.
++#
++#	This program is free software; you can redistribute it and/or
++#	modify it under the terms of the GNU General Public License as
++#	published by the Free Software Foundation, version 2 of the
++#	License.
++
++#=NAME at_secure
++#=DESCRIPTION
++# Verifies the AT_SECURE flag in the auxillary vector after an exec transition
++#=END
++
++pwd=`dirname $0`
++pwd=`cd $pwd ; /bin/pwd`
++
++bin=$pwd
++
++. $bin/prologue.inc
++
++settest transition
++at_secure=$pwd/at_secure
++test_prof=at_secure
++stacking_supported="$(kernel_features domain/stack || true)"
++
++onexec_default=1
++if [ "$stacking_supported" != "true" ]; then
++	# Pre-stacking kernels default to insecure exec transitions with
++	# change_profile rules that have an exec condition but don't have an
++	# "(un)safe" modifier.
++	onexec_default=0
++fi
++
++# Verify AT_SECURE after unconfined -> unconfined transition
++runchecktest "AT_SECURE (unconfined -> unconfined - change_onexec)" \
++	pass -O unconfined -- $at_secure 0
++runchecktest "AT_SECURE (unconfined -> unconfined - change_onexec) [NEGATIVE]" \
++	fail -O unconfined -- $at_secure 1
++
++# Verify AT_SECURE after unconfined -> confined transition
++genprofile image=$test_prof addimage:$at_secure
++runchecktest "AT_SECURE (unconfined -> confined - change_onexec)" \
++	pass -O $test_prof -- $at_secure 0
++runchecktest "AT_SECURE (unconfined -> confined - change_onexec) [NEGATIVE]" \
++	fail -O $test_prof -- $at_secure 1
++
++genprofile image=$at_secure
++runchecktest "AT_SECURE (unconfined -> confined - binary attachment)" \
++	pass -- $at_secure 0
++runchecktest "AT_SECURE (unconfined -> confined - binary attachment) [NEGATIVE]" \
++	fail -- $at_secure 1
++
++# Verify AT_SECURE after confined -> unconfined transition
++genprofile "change_profile:unconfined"
++runchecktest "AT_SECURE (confined -> unconfined - change_onexec)" \
++	pass -O unconfined -- $at_secure $onexec_default
++
++genprofile $at_secure:ux
++runchecktest "AT_SECURE (confined -> unconfined - ux)" \
++	pass -- $at_secure 0
++
++genprofile $at_secure:Ux
++runchecktest "AT_SECURE (confined -> unconfined - Ux)" \
++	pass -- $at_secure 1
++
++genprofile $at_secure:pux
++runchecktest "AT_SECURE (confined -> unconfined - pux fallback)" \
++	pass -- $at_secure 0
++
++genprofile $at_secure:PUx
++runchecktest "AT_SECURE (confined -> unconfined - PUx fallback)" \
++	pass -- $at_secure 1
++
++genprofile $at_secure:cux
++runchecktest "AT_SECURE (confined -> unconfined - cux fallback)" \
++	pass -- $at_secure 0
++
++genprofile $at_secure:CUx
++runchecktest "AT_SECURE (confined -> unconfined - CUx fallback)" \
++	pass -- $at_secure 1
++
++# Verify AT_SECURE after confined -> confined transition
++genprofile "change_profile:$test_prof" -- image=$test_prof addimage:$at_secure
++runchecktest "AT_SECURE (confined -> confined - change_onexec)" \
++	pass -O $test_prof -- $at_secure $onexec_default
++
++genprofile $at_secure:px -- image=$at_secure
++runchecktest "AT_SECURE (confined -> confined - px)" \
++	pass -- $at_secure 0
++
++genprofile $at_secure:Px -- image=$at_secure
++runchecktest "AT_SECURE (confined -> confined - Px)" \
++	pass -- $at_secure 1
++
++genprofile $at_secure:pux -- image=$at_secure
++runchecktest "AT_SECURE (confined -> confined - pux)" \
++	pass -- $at_secure 0
++
++genprofile $at_secure:PUx -- image=$at_secure
++runchecktest "AT_SECURE (confined -> confined - PUx)" \
++	pass -- $at_secure 1
++
++genprofile $at_secure:ix -- image=$at_secure
++runchecktest "AT_SECURE (confined -> confined - ix)" \
++	pass -- $at_secure 0
++
++genprofile $at_secure:pix -- image=$at_secure
++runchecktest "AT_SECURE (confined -> confined - pix)" \
++	pass -- $at_secure 0
++
++genprofile $at_secure:Pix -- image=$at_secure
++runchecktest "AT_SECURE (confined -> confined - Pix)" \
++	pass -- $at_secure 1
++
++genprofile $at_secure:cix -- image=$at_secure
++runchecktest "AT_SECURE (confined -> confined - cix fallback)" \
++	pass -- $at_secure 0
++
++genprofile $at_secure:Cix -- image=$at_secure
++runchecktest "AT_SECURE (confined -> confined - Cix fallback)" \
++	pass -- $at_secure 0
++
++# TODO: Adjust mkprofile.pl to allow child profiles so that cx and Cx can be
++# tested as well as the non-fallback cix and Cix cases
++
++if [ "$stacking_supported" != "true" ]; then
++	echo "Warning: kernel doesn't support stacking. Skipping tests..."
++else
++	removeprofile
++
++	# Verify AT_SECURE after unconfined -> &unconfined stacking transition
++	runchecktest "AT_SECURE (unconfined -> &unconfined - stack_onexec)" \
++		pass -o unconfined -- $at_secure 0
++	runchecktest "AT_SECURE (unconfined -> &unconfined - stack_onexec) [NEGATIVE]" \
++		fail -o unconfined -- $at_secure 1
++
++	# Verify AT_SECURE after unconfined -> &confined stacking transition
++	genprofile image=$test_prof addimage:$at_secure
++	runchecktest "AT_SECURE (unconfined -> &confined - stack_onexec)" \
++		pass -o $test_prof -- $at_secure 0
++	runchecktest "AT_SECURE (unconfined -> &confined - stack_onexec) [NEGATIVE]" \
++		fail -o $test_prof -- $at_secure 1
++
++	# Verify AT_SECURE after confined -> &unconfined stacking transition
++	genprofile "change_profile:&unconfined"
++	runchecktest "AT_SECURE (confined -> &unconfined - stack_onexec)" \
++		pass -o unconfined -- $at_secure $onexec_default
++
++	# Verify AT_SECURE after confined -> &confined stacking transition
++	genprofile "change_profile:&$test_prof" -- image=$test_prof addimage:$at_secure
++	runchecktest "AT_SECURE (confined -> &confined - stack_onexec)" \
++		pass -o $test_prof -- $at_secure $onexec_default
++fi
++
++if [ "$(parser_supports 'change_profile safe /a -> /b,')" != "true" ]; then
++	echo "Warning: parser doesn't support change_profile (un)safe rules. Skipping tests..."
++else
++	safe_at_secure=1
++	if [ "$stacking_supported" != "true" ]; then
++		# Pre-stacking kernels can't properly support the
++		# change_profile safe modifier:
++		#  change_profile safe /a -> /b,
++		#
++		# The parser downgrades 'safe' to 'unsafe' in this situation.
++		safe_at_secure=0
++	fi
++
++	# Verify AT_SECURE after (un)safe confined -> unconfined transition
++	genprofile "change_profile:unsafe:$at_secure:unconfined"
++	runchecktest "AT_SECURE (confined -> unconfined - unsafe change_onexec)" \
++		pass -O unconfined -- $at_secure 0
++
++	genprofile "change_profile:safe:$at_secure:unconfined"
++	runchecktest "AT_SECURE (confined -> unconfined - safe change_onexec)" \
++		pass -O unconfined -- $at_secure $safe_at_secure
++
++	# Verify AT_SECURE after (un)safe confined -> confined transition
++	genprofile "change_profile:unsafe:$at_secure:$test_prof" -- image=$test_prof addimage:$at_secure
++	runchecktest "AT_SECURE (confined -> confined - unsafe change_onexec)" \
++		pass -O $test_prof -- $at_secure 0
++
++	genprofile "change_profile:safe:$at_secure:$test_prof" -- image=$test_prof addimage:$at_secure
++	runchecktest "AT_SECURE (confined -> confined - safe change_onexec)" \
++		pass -O $test_prof -- $at_secure $safe_at_secure
++
++	if [ "$stacking_supported" != "true" ]; then
++		# We've already warned the user that we're skipping stacking tests
++		:
++	else
++		# Verify AT_SECURE after (un)safe confined -> &unconfined stacking transition
++		genprofile "change_profile:unsafe:$at_secure:&unconfined"
++		runchecktest "AT_SECURE (confined -> &unconfined - unsafe stack_onexec)" \
++			pass -o unconfined -- $at_secure 0
++
++		genprofile "change_profile:safe:$at_secure:&unconfined"
++		runchecktest "AT_SECURE (confined -> &unconfined - safe stack_onexec)" \
++			pass -o unconfined -- $at_secure 1
++
++		# Verify AT_SECURE after (un)safe confined -> &confined stacking transition
++		genprofile "change_profile:unsafe:$at_secure:&$test_prof" -- image=$test_prof addimage:$at_secure
++		runchecktest "AT_SECURE (confined -> &confined - unsafe stack_onexec)" \
++			pass -o $test_prof -- $at_secure 0
++
++		genprofile "change_profile:safe:$at_secure:&$test_prof" -- image=$test_prof addimage:$at_secure
++		runchecktest "AT_SECURE (confined -> &confined - safe stack_onexec)" \
++			pass -o $test_prof -- $at_secure 1
++	fi
++fi
+
+=== modified file 'tests/regression/apparmor/exec_stack.sh'
+--- old/tests/regression/apparmor/exec_stack.sh	2016-03-29 16:17:53 +0000
++++ new/tests/regression/apparmor/exec_stack.sh	2016-05-28 16:58:41 +0000
+@@ -20,7 +20,7 @@
+ . $bin/prologue.inc
+ 
+ requires_kernel_features domain/stack
+-settest stacking
++settest transition
+ 
+ file=$tmpdir/file
+ otherfile=$tmpdir/file2
+
+=== modified file 'tests/regression/apparmor/mkprofile.pl'
+--- old/tests/regression/apparmor/mkprofile.pl	2016-03-19 08:39:07 +0000
++++ new/tests/regression/apparmor/mkprofile.pl	2016-05-31 20:38:36 +0000
+@@ -345,6 +345,8 @@
+ 	}
+     } elsif (@rules == 3) {
+         push (@{$output_rules{$hat}}, "  change_profile $rules[1] -> $rules[2],\n",);
++    } elsif (@rules == 4) {
++        push (@{$output_rules{$hat}}, "  change_profile $rules[1] $rules[2] -> $rules[3],\n",);
+     } else {
+         (!$nowarn) && print STDERR "Warning: invalid change_profile description '$rule', ignored\n";
+     }
+
+=== modified file 'tests/regression/apparmor/prologue.inc'
+--- old/tests/regression/apparmor/prologue.inc	2016-02-18 21:58:06 +0000
++++ new/tests/regression/apparmor/prologue.inc	2016-05-28 17:00:50 +0000
+@@ -69,7 +69,7 @@
+ 
+ parser_supports()
+ {
+-	for R in $@ ; do
++	for R in "$@" ; do
+ 		echo "/test { $R }" | $subdomain ${parser_args} -qQT 2>/dev/null 1>/dev/null
+ 		if [ $? -ne 0 ] ; then
+ 			echo "Compiler does not support rule '$R'"
+
+=== removed file 'tests/regression/apparmor/stacking.c'
+--- old/tests/regression/apparmor/stacking.c	2016-03-19 06:44:51 +0000
++++ new/tests/regression/apparmor/stacking.c	1970-01-01 00:00:00 +0000
+@@ -1,337 +0,0 @@
+-/*
+- * Copyright (C) 2014-2016 Canonical, Ltd.
+- *
+- * This program is free software; you can redistribute it and/or
+- * modify it under the terms of version 2 of the GNU General Public
+- * License published by the Free Software Foundation.
+- *
+- * This program is distributed in the hope that it will be useful,
+- * but WITHOUT ANY WARRANTY; without even the implied warranty of
+- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+- * GNU General Public License for more details.
+- *
+- * You should have received a copy of the GNU General Public License
+- * along with this program; if not, contact Canonical Ltd.
+- */
+-
+-#define _GNU_SOURCE
+-
+-#include <errno.h>
+-#include <stdio.h>
+-#include <stdlib.h>
+-#include <string.h>
+-#include <sys/apparmor.h>
+-#include <sys/socket.h>
+-#include <sys/types.h>
+-#include <unistd.h>
+-
+-#include "changehat.h" /* for do_open() */
+-
+-#define STACK_DELIM	"//&"
+-#define STACK_DELIM_LEN	strlen(STACK_DELIM)
+-
+-#define NO_MODE		"(null)"
+-
+-static void file_io(const char *file)
+-{
+-	int rc = do_open(file);
+-
+-	if (rc != 0)
+-		exit(rc);
+-}
+-
+-struct single_label {
+-	const char *label;
+-	size_t len;
+-};
+-
+-#define MAX_LABELS	32
+-
+-struct compound_label {
+-	size_t num_labels;
+-	struct single_label labels[MAX_LABELS];
+-};
+-
+-/**
+- * Initializes @sl by parsing @compound_label. Returns a pointer to the
+- * location of the next label in the compound label string, which should be
+- * passed in as @compound_label the next time that next_label() is called. NULL
+- * is returned when there are no more labels in @compound_label.
+- */
+-static const char *next_label(struct single_label *sl,
+-			      const char *compound_label)
+-{
+-	const char *delim;
+-
+-	if (!compound_label || compound_label[0] == '\0')
+-		return NULL;
+-
+-	delim = strstr(compound_label, STACK_DELIM);
+-	if (!delim) {
+-		sl->label = compound_label;
+-		sl->len = strlen(sl->label);
+-		return sl->label + sl->len;
+-	}
+-
+-	sl->label = compound_label;
+-	sl->len = delim - sl->label;
+-	return delim + STACK_DELIM_LEN;
+-}
+-
+-/* Returns true if the compound label was constructed successfully */
+-static bool compound_label_init(struct compound_label *cl,
+-				const char *compound_label)
+-{
+-	memset(cl, 0, sizeof(*cl));
+-	while ((compound_label = next_label(&cl->labels[cl->num_labels],
+-					    compound_label))) {
+-		cl->num_labels++;
+-
+-		if (cl->num_labels == MAX_LABELS)
+-			return false;
+-	}
+-
+-	return true;
+-}
+-
+-/* Returns true if the compound label contains the single label */
+-static bool compound_label_contains(struct compound_label *cl,
+-				    struct single_label *sl)
+-{
+-	bool matched = false;
+-	size_t i;
+-
+-	for (i = 0; !matched && i < cl->num_labels; i++) {
+-		if (cl->labels[i].len != sl->len)
+-			continue;
+-
+-		if (strncmp(cl->labels[i].label, sl->label, sl->len))
+-			continue;
+-
+-		matched = true;
+-	}
+-
+-	return matched;
+-}
+-
+-/* Returns true if the two compound labels contain the same label sets */
+-static bool compound_labels_equal(struct compound_label *cl1,
+-				  struct compound_label *cl2)
+-{
+-	size_t i;
+-
+-	if (cl1->num_labels != cl2->num_labels)
+-		return false;
+-
+-	for (i = 0; i < cl1->num_labels; i++) {
+-		if (!compound_label_contains(cl2, &cl1->labels[i]))
+-			return false;
+-	}
+-
+-	return true;
+-}
+-
+-/**
+- * Verifies that the current confinement context matches the expected context.
+- *
+- * Either @expected_label or @expected_mode can be NULL if their values should
+- * not be verified. If a NULL mode is expected, as what happens when an
+- * unconfined process calls aa_getcon(2), then @expected_mode should be equal
+- * to NO_MODE.
+- */
+-static void verify_confinement_context(const char *expected_label,
+-				       const char *expected_mode)
+-{
+-	char *label, *mode;
+-	int expected_rc, rc;
+-	bool null_expected_mode = expected_mode ?
+-				  strcmp(NO_MODE, expected_mode) == 0 : false;
+-
+-	rc = aa_getcon(&label, &mode);
+-	if (rc < 0) {
+-		int err = errno;
+-		fprintf(stderr, "FAIL - aa_getcon: %m");
+-		exit(err);
+-	}
+-
+-	if (expected_label) {
+-		struct compound_label cl, expected_cl;
+-
+-		if (!compound_label_init(&cl, label)) {
+-			fprintf(stderr, "FAIL - could not parse current compound label: %s\n",
+-				label);
+-			rc = EINVAL;
+-			goto err;
+-		}
+-
+-		if (!compound_label_init(&expected_cl, expected_label)) {
+-			fprintf(stderr, "FAIL - could not parse expected compound label: %s\n",
+-				expected_label);
+-			rc = EINVAL;
+-			goto err;
+-		}
+-
+-		if (!compound_labels_equal(&cl, &expected_cl)) {
+-			fprintf(stderr, "FAIL - label \"%s\" != expected_label \"%s\"\n",
+-				label, expected_label);
+-			rc = EINVAL;
+-			goto err;
+-		}
+-	}
+-
+-	if (expected_mode &&
+-	    ((!mode && !null_expected_mode) ||
+-	     (mode && strcmp(mode, expected_mode)))) {
+-		fprintf(stderr, "FAIL - mode \"%s\" != expected_mode \"%s\"\n",
+-			mode, expected_mode);
+-		rc = EINVAL;
+-		goto err;
+-	}
+-
+-	expected_rc = expected_label ? strlen(expected_label) : strlen(label);
+-
+-	/**
+-	 * Add the expected bytes following the returned label string:
+-	 *
+-	 *   ' ' + '(' + mode + ')'
+-	 */
+-	if (expected_mode && !null_expected_mode)
+-		expected_rc += 1 + 1 + strlen(expected_mode) + 1;
+-	else if (mode)
+-		expected_rc += 1 + 1 + strlen(mode) + 1;
+-
+-	expected_rc++; /* Trailing NUL terminator */
+-
+-	if (rc != expected_rc) {
+-		fprintf(stderr, "FAIL - rc (%d) != expected_rc (%d)\n",
+-			rc, expected_rc);
+-		rc = EINVAL;
+-		goto err;
+-	}
+-
+-	return;
+-err:
+-	free(label);
+-	exit(EINVAL);
+-}
+-
+-static void stack_onexec(const char *label)
+-{
+-	if (aa_stack_onexec(label) != 0) {
+-		int err = errno;
+-		perror("FAIL - aa_stack_onexec");
+-		exit(err);
+-	}
+-}
+-
+-static void stack_profile(const char *label)
+-{
+-	if (aa_stack_profile(label) != 0) {
+-		int err = errno;
+-		perror("FAIL - aa_stack_profile");
+-		exit(err);
+-	}
+-}
+-
+-static void exec(const char *prog, char **argv)
+-{
+-	int err;
+-
+-	execv(prog, argv);
+-	err = errno;
+-	perror("FAIL - execv");
+-	exit(err);
+-}
+-
+-static void usage(const char *prog)
+-{
+-	fprintf(stderr,
+-		"%s: [-o <LABEL> | -p <LABEL>] [-l <LABEL>] [-m <MODE>] [-f <FILE>] [-- ... [-- ...]]\n"
+-		"  -o <LABEL>\tCall aa_stack_onexec(LABEL)\n"
+-		"  -p <LABEL>\tCall aa_stack_profile(LABEL)\n"
+-		"  -l <LABEL>\tVerify that aa_getcon() returns LABEL\n"
+-		"  -m <MODE>\tVerify that aa_getcon() returns MODE. Set to \"%s\" if a NULL mode is expected.\n"
+-		"  -f <FILE>\tOpen FILE and attempt to write to and read from it\n\n"
+-		"If \"--\" is encountered, execv() will be called using the following argument\n"
+-		"as the program to execute and passing it all of the arguments following the\n"
+-		"program name.\n", prog, NO_MODE);
+-	exit(EINVAL);
+-}
+-
+-struct options {
+-	const char *file;
+-	const char *expected_label;
+-	const char *expected_mode;
+-	const char *stack_onexec;
+-	const char *stack_profile;
+-	const char *exec;
+-	char **exec_argv;
+-};
+-
+-static void parse_opts(int argc, char **argv, struct options *opts)
+-{
+-	int o;
+-
+-	memset(opts, 0, sizeof(*opts));
+-	while ((o = getopt(argc, argv, "f:l:m:o:p:")) != -1) {
+-		switch (o) {
+-		case 'f': /* file */
+-			opts->file = optarg;
+-			break;
+-		case 'l': /* expected label */
+-			opts->expected_label = optarg;
+-			break;
+-		case 'm': /* expected mode */
+-			opts->expected_mode = optarg;
+-			break;
+-		case 'o': /* aa_stack_onexec */
+-			opts->stack_onexec = optarg;
+-			break;
+-		case 'p': /* aa_stack_profile */
+-			opts->stack_profile = optarg;
+-			break;
+-		default: /* '?' */
+-			usage(argv[0]);
+-		}
+-	}
+-
+-	/* Can only specify one or the other */
+-	if (opts->stack_onexec && opts->stack_profile) {
+-		usage(argv[0]);
+-	}
+-
+-	if (optind < argc) {
+-		/* Ensure that the previous option was "--" */
+-		if (optind == 0 || strcmp("--", argv[optind - 1]))
+-			usage(argv[0]);
+-
+-		opts->exec = argv[optind];
+-		opts->exec_argv = &argv[optind];
+-	}
+-}
+-
+-int main(int argc, char **argv)
+-{
+-	struct options opts;
+-
+-	parse_opts(argc, argv, &opts);
+-
+-	if (opts.stack_onexec)
+-		stack_onexec(opts.stack_onexec);
+-	else if (opts.stack_profile)
+-		stack_profile(opts.stack_profile);
+-
+-	if (opts.file)
+-		file_io(opts.file);
+-
+-	if (opts.expected_label || opts.expected_mode)
+-		verify_confinement_context(opts.expected_label,
+-					   opts.expected_mode);
+-
+-	if (opts.exec)
+-		exec(opts.exec, opts.exec_argv);
+-
+-	printf("PASS\n");
+-	exit(0);
+-}
+-
+
+=== modified file 'tests/regression/apparmor/stackonexec.sh'
+--- old/tests/regression/apparmor/stackonexec.sh	2016-03-29 16:17:53 +0000
++++ new/tests/regression/apparmor/stackonexec.sh	2016-05-28 16:58:41 +0000
+@@ -20,7 +20,7 @@
+ . $bin/prologue.inc
+ 
+ requires_kernel_features domain/stack
+-settest stacking
++settest transition
+ 
+ file=$tmpdir/file
+ otherfile=$tmpdir/file2
+
+=== modified file 'tests/regression/apparmor/stackprofile.sh'
+--- old/tests/regression/apparmor/stackprofile.sh	2016-03-29 16:17:53 +0000
++++ new/tests/regression/apparmor/stackprofile.sh	2016-05-28 16:58:41 +0000
+@@ -20,7 +20,7 @@
+ . $bin/prologue.inc
+ 
+ requires_kernel_features domain/stack
+-settest stacking
++settest transition
+ 
+ file=$tmpdir/file
+ otherfile=$tmpdir/file2
+
+=== added file 'tests/regression/apparmor/transition.c'
+--- old/tests/regression/apparmor/transition.c	1970-01-01 00:00:00 +0000
++++ new/tests/regression/apparmor/transition.c	2016-05-28 16:58:41 +0000
+@@ -0,0 +1,384 @@
++/*
++ * Copyright (C) 2014-2016 Canonical, Ltd.
++ *
++ * This program is free software; you can redistribute it and/or
++ * modify it under the terms of version 2 of the GNU General Public
++ * License published by the Free Software Foundation.
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program; if not, contact Canonical Ltd.
++ */
++
++#define _GNU_SOURCE
++
++#include <errno.h>
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++#include <sys/apparmor.h>
++#include <sys/socket.h>
++#include <sys/types.h>
++#include <unistd.h>
++
++#include "changehat.h" /* for do_open() */
++
++#define STACK_DELIM	"//&"
++#define STACK_DELIM_LEN	strlen(STACK_DELIM)
++
++#define NO_MODE		"(null)"
++
++#define CHANGE_PROFILE	1
++#define CHANGE_ONEXEC	2
++#define STACK_PROFILE	3
++#define STACK_ONEXEC	4
++
++static void file_io(const char *file)
++{
++	int rc = do_open(file);
++
++	if (rc != 0)
++		exit(rc);
++}
++
++struct single_label {
++	const char *label;
++	size_t len;
++};
++
++#define MAX_LABELS	32
++
++struct compound_label {
++	size_t num_labels;
++	struct single_label labels[MAX_LABELS];
++};
++
++/**
++ * Initializes @sl by parsing @compound_label. Returns a pointer to the
++ * location of the next label in the compound label string, which should be
++ * passed in as @compound_label the next time that next_label() is called. NULL
++ * is returned when there are no more labels in @compound_label.
++ */
++static const char *next_label(struct single_label *sl,
++			      const char *compound_label)
++{
++	const char *delim;
++
++	if (!compound_label || compound_label[0] == '\0')
++		return NULL;
++
++	delim = strstr(compound_label, STACK_DELIM);
++	if (!delim) {
++		sl->label = compound_label;
++		sl->len = strlen(sl->label);
++		return sl->label + sl->len;
++	}
++
++	sl->label = compound_label;
++	sl->len = delim - sl->label;
++	return delim + STACK_DELIM_LEN;
++}
++
++/* Returns true if the compound label was constructed successfully */
++static bool compound_label_init(struct compound_label *cl,
++				const char *compound_label)
++{
++	memset(cl, 0, sizeof(*cl));
++	while ((compound_label = next_label(&cl->labels[cl->num_labels],
++					    compound_label))) {
++		cl->num_labels++;
++
++		if (cl->num_labels == MAX_LABELS)
++			return false;
++	}
++
++	return true;
++}
++
++/* Returns true if the compound label contains the single label */
++static bool compound_label_contains(struct compound_label *cl,
++				    struct single_label *sl)
++{
++	bool matched = false;
++	size_t i;
++
++	for (i = 0; !matched && i < cl->num_labels; i++) {
++		if (cl->labels[i].len != sl->len)
++			continue;
++
++		if (strncmp(cl->labels[i].label, sl->label, sl->len))
++			continue;
++
++		matched = true;
++	}
++
++	return matched;
++}
++
++/* Returns true if the two compound labels contain the same label sets */
++static bool compound_labels_equal(struct compound_label *cl1,
++				  struct compound_label *cl2)
++{
++	size_t i;
++
++	if (cl1->num_labels != cl2->num_labels)
++		return false;
++
++	for (i = 0; i < cl1->num_labels; i++) {
++		if (!compound_label_contains(cl2, &cl1->labels[i]))
++			return false;
++	}
++
++	return true;
++}
++
++/**
++ * Verifies that the current confinement context matches the expected context.
++ *
++ * Either @expected_label or @expected_mode can be NULL if their values should
++ * not be verified. If a NULL mode is expected, as what happens when an
++ * unconfined process calls aa_getcon(2), then @expected_mode should be equal
++ * to NO_MODE.
++ */
++static void verify_confinement_context(const char *expected_label,
++				       const char *expected_mode)
++{
++	char *label, *mode;
++	int expected_rc, rc;
++	bool null_expected_mode = expected_mode ?
++				  strcmp(NO_MODE, expected_mode) == 0 : false;
++
++	rc = aa_getcon(&label, &mode);
++	if (rc < 0) {
++		int err = errno;
++		fprintf(stderr, "FAIL - aa_getcon: %m");
++		exit(err);
++	}
++
++	if (expected_label) {
++		struct compound_label cl, expected_cl;
++
++		if (!compound_label_init(&cl, label)) {
++			fprintf(stderr, "FAIL - could not parse current compound label: %s\n",
++				label);
++			rc = EINVAL;
++			goto err;
++		}
++
++		if (!compound_label_init(&expected_cl, expected_label)) {
++			fprintf(stderr, "FAIL - could not parse expected compound label: %s\n",
++				expected_label);
++			rc = EINVAL;
++			goto err;
++		}
++
++		if (!compound_labels_equal(&cl, &expected_cl)) {
++			fprintf(stderr, "FAIL - label \"%s\" != expected_label \"%s\"\n",
++				label, expected_label);
++			rc = EINVAL;
++			goto err;
++		}
++	}
++
++	if (expected_mode &&
++	    ((!mode && !null_expected_mode) ||
++	     (mode && strcmp(mode, expected_mode)))) {
++		fprintf(stderr, "FAIL - mode \"%s\" != expected_mode \"%s\"\n",
++			mode, expected_mode);
++		rc = EINVAL;
++		goto err;
++	}
++
++	expected_rc = expected_label ? strlen(expected_label) : strlen(label);
++
++	/**
++	 * Add the expected bytes following the returned label string:
++	 *
++	 *   ' ' + '(' + mode + ')'
++	 */
++	if (expected_mode && !null_expected_mode)
++		expected_rc += 1 + 1 + strlen(expected_mode) + 1;
++	else if (mode)
++		expected_rc += 1 + 1 + strlen(mode) + 1;
++
++	expected_rc++; /* Trailing NUL terminator */
++
++	if (rc != expected_rc) {
++		fprintf(stderr, "FAIL - rc (%d) != expected_rc (%d)\n",
++			rc, expected_rc);
++		rc = EINVAL;
++		goto err;
++	}
++
++	return;
++err:
++	free(label);
++	exit(EINVAL);
++}
++
++static void handle_transition(int transition, const char *target)
++{
++	const char *msg;
++	int rc = 0;
++
++	switch (transition) {
++	case CHANGE_ONEXEC:
++		msg = "FAIL - aa_change_onexec";
++		rc = aa_change_onexec(target);
++		break;
++	case CHANGE_PROFILE:
++		msg = "FAIL - aa_change_profile";
++		rc = aa_change_profile(target);
++		break;
++	case STACK_ONEXEC:
++		msg = "FAIL - aa_stack_onexec";
++#ifdef WITHOUT_STACKING
++		rc = -1;
++		errno = ENOTSUP;
++#else
++		rc = aa_stack_onexec(target);
++#endif
++		break;
++	case STACK_PROFILE:
++		msg = "FAIL - aa_stack_profile";
++#ifdef WITHOUT_STACKING
++		rc = -1;
++		errno = ENOTSUP;
++#else
++		rc = aa_stack_profile(target);
++#endif
++		break;
++	default:
++		msg = "FAIL - handle_transition";
++		rc = -1;
++		errno = ENOTSUP;
++	}
++
++	if (rc != 0) {
++		int err = errno;
++		perror(msg);
++		exit(err);
++	}
++}
++
++static void exec(const char *prog, char **argv)
++{
++	int err;
++
++	execv(prog, argv);
++	err = errno;
++	perror("FAIL - execv");
++	exit(err);
++}
++
++static void usage(const char *prog)
++{
++	fprintf(stderr,
++		"%s: [-O <LABEL> | -P <LABEL> | -o <LABEL> | -p <LABEL>] [-l <LABEL>] [-m <MODE>] [-f <FILE>] [-- ... [-- ...]]\n"
++		"  -O <LABEL>\tCall aa_change_onexec(LABEL)\n"
++		"  -P <LABEL>\tCall aa_change_profile(LABEL)\n"
++		"  -o <LABEL>\tCall aa_stack_onexec(LABEL)\n"
++		"  -p <LABEL>\tCall aa_stack_profile(LABEL)\n"
++		"  -l <LABEL>\tVerify that aa_getcon() returns LABEL\n"
++		"  -m <MODE>\tVerify that aa_getcon() returns MODE. Set to \"%s\" if a NULL mode is expected.\n"
++		"  -f <FILE>\tOpen FILE and attempt to write to and read from it\n\n"
++		"If \"--\" is encountered, execv() will be called using the following argument\n"
++		"as the program to execute and passing it all of the arguments following the\n"
++		"program name.\n", prog, NO_MODE);
++	exit(EINVAL);
++}
++
++struct options {
++	const char *file;
++	const char *expected_label;
++	const char *expected_mode;
++
++	int transition;		/* CHANGE_PROFILE, STACK_ONEXEC, etc. */
++	const char *target;	/* The target label of the transition */
++
++	const char *exec;
++	char **exec_argv;
++};
++
++static void set_transition(const char *prog, struct options *opts,
++			   int transition, const char *target)
++{
++	/* Can only specify one transition */
++	if (opts->transition || opts->target)
++		usage(prog);
++
++	opts->transition = transition;
++	opts->target = target;
++}
++
++static void parse_opts(int argc, char **argv, struct options *opts)
++{
++	const char *prog = argv[0];
++	int o;
++
++	memset(opts, 0, sizeof(*opts));
++	while ((o = getopt(argc, argv, "f:l:m:O:P:o:p:")) != -1) {
++		switch (o) {
++		case 'f': /* file */
++			opts->file = optarg;
++			break;
++		case 'l': /* expected label */
++			opts->expected_label = optarg;
++			break;
++		case 'm': /* expected mode */
++			opts->expected_mode = optarg;
++			break;
++		case 'O': /* aa_change_profile */
++			set_transition(prog, opts, CHANGE_ONEXEC, optarg);
++			break;
++		case 'P': /* aa_change_profile */
++			set_transition(prog, opts, CHANGE_PROFILE, optarg);
++			break;
++		case 'o': /* aa_stack_onexec */
++			set_transition(prog, opts, STACK_ONEXEC, optarg);
++			break;
++		case 'p': /* aa_stack_profile */
++			set_transition(prog, opts, STACK_PROFILE, optarg);
++			break;
++		default: /* '?' */
++			usage(prog);
++		}
++	}
++
++	if (optind < argc) {
++		/* Ensure that the previous option was "--" */
++		if (optind == 0 || strcmp("--", argv[optind - 1]))
++			usage(prog);
++
++		opts->exec = argv[optind];
++		opts->exec_argv = &argv[optind];
++	}
++}
++
++int main(int argc, char **argv)
++{
++	struct options opts;
++
++	parse_opts(argc, argv, &opts);
++
++	if (opts.transition)
++		handle_transition(opts.transition, opts.target);
++
++	if (opts.file)
++		file_io(opts.file);
++
++	if (opts.expected_label || opts.expected_mode)
++		verify_confinement_context(opts.expected_label,
++					   opts.expected_mode);
++
++	if (opts.exec)
++		exec(opts.exec, opts.exec_argv);
++
++	printf("PASS\n");
++	exit(0);
++}
++
+
+=== modified file 'utils/vim/apparmor.vim.in'
+--- old/utils/vim/apparmor.vim.in	2014-10-16 21:55:43 +0000
++++ new/utils/vim/apparmor.vim.in	2016-05-27 18:05:21 +0000
+@@ -147,9 +147,9 @@
+ 
+ 
+ " Change Profile
+-" TODO: audit and deny support will be added (JJ, 2011-01-11)
+-syn match   sdEntryChangeProfile    /\v^\s*change_profile\s+-\>\s+\S+@@EOL@@/ contains=sdGlob,sdComment nextgroup=@sdEntry,sdComment,sdError,sdInclude
+-
++syn match   sdEntryChangeProfile    /\v^\s*@@auditdeny@@change_profile\s+(safe\s+[/@]\S+|unsafe\s+[/@]\S+|[/@]\S+)?\s*(-\>\s*\S+)?@@EOL@@/ contains=sdGlob,sdComment nextgroup=@sdEntry,sdComment,sdError,sdInclude
++" bare change_profile rule
++syn match   sdEntryChangeProfile    /\v^\s*@@auditdeny@@change_profile@@EOL@@/ contains=sdComment nextgroup=@sdEntry,sdComment,sdError,sdInclude
+ 
+ " rlimit
+ " TODO: audit and deny support will be added (JJ, 2011-01-11)
+

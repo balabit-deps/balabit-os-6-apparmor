@@ -1,0 +1,36 @@
+Description: Ignore file events with a request mask of 'send' or 'receive'
+ .
+ Those events are actually network events, so ideally we should map them
+ as such. Unfortunately this requires bigger changes, so here is a hotfix
+ that ignores those events and thus avoids crashing aa-logprof.
+ .
+ References: https://bugs.launchpad.net/apparmor/+bug/1577051
+             https://bugs.launchpad.net/apparmor/+bug/1582374
+ .
+ 
+ Acked-by: Seth Arnold <seth.arnold@canonical.com> for trunk, 2.10 and 2.9
+Origin: commit, revision id: apparmor@cboltz.de-20160523213143-a2wez9f180mxd07m
+Author: Christian Boltz <apparmor@cboltz.de>
+Bug: https://launchpad.net/bugs/1577051
+Bug: https://launchpad.net/bugs/1582374
+Last-Update: 2016-05-23
+X-Bzr-Revision-Id: apparmor@cboltz.de-20160523213143-a2wez9f180mxd07m
+
+=== modified file 'utils/apparmor/logparser.py'
+--- old/utils/apparmor/logparser.py	2016-05-23 21:24:30 +0000
++++ new/utils/apparmor/logparser.py	2016-05-23 21:31:43 +0000
+@@ -295,6 +295,13 @@
+                 self.debug_logger.debug('UNHANDLED (missing request_mask): %s' % e)
+                 return None
+ 
++            # sometimes network events come with an e['operation'] that matches the list of file operations
++            # see https://bugs.launchpad.net/apparmor/+bug/1577051 and https://bugs.launchpad.net/apparmor/+bug/1582374
++            # XXX these events are network events, so we should map them as such
++            if e['request_mask'] in ('send', 'receive'):
++                self.debug_logger.debug('UNHANDLED (request_mask is send or receive): %s' % e)
++                return None
++
+             # Map c (create) and d (delete) to w (logging is more detailed than the profile language)
+             rmask = e['request_mask']
+             rmask = rmask.replace('c', 'w')
+

@@ -1,0 +1,471 @@
+Description: tests: Fix onexec.sh races by using the transition test program
+ .
+ The onexec.sh test has periodically exhibited unexplicable failures that
+ are possibly due to race conditions when onexec.sh is verifying the
+ /proc/PID/attr/{current,exec} values of the process under test. This
+ patch attempts to solve the flaky test failures by removing the need for
+ IPC to coordinate between the test script and the test program.
+ .
+ The old onexec test program is removed and the transition test program
+ is used instead. This allows for the test script to tell the transition
+ test program what its current and exec procattr labels should be via
+ command line options.
+ .
+ Since IPC is no longer needed, the signal:ALL allow rule can be dropped
+ from the test profile. A new allow rule is needed to grant reading of
+ /proc/*/attr/{current,exec} since transition must verify the contents of
+ these files.
+ .
+ Signed-off-by: Tyler Hicks <tyhicks@canonical.com>
+ Acked-by: Seth Arnold <seth.arnold@canonical.com>
+Origin: upstream, https://bazaar.launchpad.net/~apparmor-dev/apparmor/master/revision/3488
+Origin: upstream, https://bazaar.launchpad.net/~apparmor-dev/apparmor/master/revision/3489
+Author: Tyler Hicks <tyhicks@canonical.com>
+Last-Update: 2016-06-25
+
+=== modified file 'tests/regression/apparmor/Makefile'
+--- old/tests/regression/apparmor/Makefile	2016-05-28 16:58:41 +0000
++++ new/tests/regression/apparmor/Makefile	2016-06-25 15:25:28 +0000
+@@ -73,7 +73,6 @@
+     at_secure.c \
+     introspect.c \
+     changeprofile.c \
+-    onexec.c \
+     changehat.c \
+     changehat_fork.c \
+     changehat_misc.c \
+
+=== removed file 'tests/regression/apparmor/onexec.c'
+--- old/tests/regression/apparmor/onexec.c	2016-03-19 08:35:42 +0000
++++ new/tests/regression/apparmor/onexec.c	1970-01-01 00:00:00 +0000
+@@ -1,63 +0,0 @@
+-/*
+- *	Copyright (C) 2002-2005 Novell/SUSE
+- *
+- *	This program is free software; you can redistribute it and/or
+- *	modify it under the terms of the GNU General Public License as
+- *	published by the Free Software Foundation, version 2 of the
+- *	License.
+- */
+-
+-#include <stdio.h>
+-#include <unistd.h>
+-#include <errno.h>
+-#include <sys/types.h>
+-#include <sys/stat.h>
+-#include <fcntl.h>
+-#include <string.h>
+-#include <stdlib.h>
+-#include <signal.h>
+-#include <linux/unistd.h>
+-
+-#include <sys/apparmor.h>
+-#include "changehat.h"
+-
+-int main(int argc, char *argv[])
+-{
+-	int rc = 0;
+-
+-	extern char **environ;
+-
+-	if (argc < 3){
+-		fprintf(stderr, "usage: %s profile executable args\n",
+-			argv[0]);
+-		return 1;
+-	}
+-
+-	/* change profile if profile name != nochange */
+-	if (strcmp(argv[1], "nochange") != 0){
+-		rc = aa_change_onexec(argv[1]);
+-		if (rc == -1){
+-			fprintf(stderr, "FAIL: change_onexec %s failed - %s\n",
+-				argv[1], strerror(errno));
+-			exit(errno);
+-		}
+-	}
+-
+-	/* stop after onexec and wait to for continue before exec so
+-	 * caller can introspect task */
+-	rc = kill(getpid(), SIGSTOP);
+-	if (rc == -1){
+-		fprintf(stderr, "FAIL: signal to self failed - %s\n",
+-			strerror(errno));
+-		exit(errno);
+-	}
+-
+-	(void)execve(argv[2], &argv[2], environ);
+-	/* exec failed, kill outselves to flag parent */
+-
+-	rc = errno;
+-
+-	fprintf(stderr, "FAIL: exec to '%s' failed\n", argv[2]);
+-
+-	return rc;
+-}
+
+=== modified file 'tests/regression/apparmor/onexec.sh'
+--- old/tests/regression/apparmor/onexec.sh	2016-03-19 08:37:46 +0000
++++ new/tests/regression/apparmor/onexec.sh	2016-06-25 15:25:28 +0000
+@@ -18,6 +18,7 @@
+ 
+ . $bin/prologue.inc
+ 
++settest transition
+ file=$tmpdir/file
+ subfile=$tmpdir/file2
+ okperm=rw
+@@ -29,63 +30,11 @@
+ subtest2="$pwd//sub2"
+ subtest3="$pwd//sub3"
+ 
+-onexec="/proc/*/attr/exec"
++exec_w="/proc/*/attr/exec:w"
++attrs_r="/proc/*/attr/{current,exec}:r"
+ 
+ touch $file $subfile
+ 
+-check_exec()
+-{
+-    local rc
+-    local actual
+-    local desc="$1"
+-    local pid="$2"
+-    local expected="$3"
+-    actual=`cat /proc/${pid}/attr/exec 2>/dev/null`
+-    rc=$?
+-
+-    # /proc/${pid}/attr/exec returns invalid argument if onexec has not been called
+-    if [ $rc -ne 0 ] ; then
+-	if [ "${expected}" == "nochange" ] ; then
+-	    return 0
+-	fi
+-	echo "ONEXEC (${desc}) - exec transition not set"
+-	return $rc
+-    fi
+-    if [ "${actual% (*)}" != "${expected}" ] ; then
+-	echo "ONEXEC (${desc}) - check exec '${actual% (*)}' != expected '${expected}'"
+-	return 1
+-    fi
+-
+-    return 0
+-}
+-
+-check_current()
+-{
+-    local rc
+-    local actual
+-    local desc="$1"
+-    local pid="$2"
+-    local expected="$3"
+-    actual=`cat /proc/${pid}/attr/current 2>/dev/null`
+-    rc=$?
+-
+-    # /proc/${pid}/attr/current return enoent if the onexec process already exited due to error
+-    if [ $rc -ne 0 ] ; then
+-	# These assume a check has already been done to see if the
+-	# task is still around
+-	echo -n "ONEXEC - check current ($1): "
+-	cat /proc/${pid}/attr/current
+-	return $rc
+-    fi
+-
+-    if [ "${actual% (*)}" != "${expected}" ] ; then
+-	echo "ONEXEC - check current (${desc}) '${actual% (*)}' != expected '${expected}'"
+-	return 1
+-    fi
+-
+-    return 0
+-}
+-
+ do_test()
+ {
+     local desc="$1"
+@@ -94,34 +43,12 @@
+     local res="$4"
+     shift 4
+ 
+-    #ignore prologue.inc error trapping that catches our subfn return values
+-
+-    runtestbg "ONEXEC $desc ($prof -> $target_prof)" $res $target_prof "$@"
+-    # check that transition does not happen before exec, and that transition
+-    # is set
+-
+-    # give the onexec process a chance to run
+-    sleep 0.05
+-
+-    # check that task hasn't exited because change_onexec failed
+-    if ! [ -d "/proc/${_pid}" ] ; then
+-	checktestfg
+-	return
+-    fi
+-
+-    if ! check_current "${desc}" $_pid $prof ; then
+-	checktestfg
+-	return
+-    fi
+-
+-    if ! check_exec "${desc}" $_pid $target_prof ; then
+-	checktestfg
+-	return
+-    fi
+-
+-    kill -CONT $_pid
+-
+-    checktestbg
++    desc="ONEXEC $desc ($prof -> $target_prof)"
++    if [ "$target_prof" == "nochange" ] ; then
++        runchecktest "$desc" $res -l "$prof" -- "$@"
++    else
++        runchecktest "$desc" $res -O "$target_prof" -l "$prof" -L "$target_prof" -- "$@"
++    fi
+ }
+ 
+ 
+@@ -146,59 +73,55 @@
+ 
+ #------
+ 
+-# NOTE: test program pauses for the driver script to catch up by sending
+-# and recieving SIGSTOP/SIGCONT, so the onexec program needs access to
+-# signals (this is not a script to test signal mediation)
+-
+ # ONEXEC from CONFINED - don't change profile, open can't exec
+-genprofile 'change_profile->':$bin/rw $onexec:w signal:ALL
+-do_test "no px perm" $bin/onexec nochange fail $bin/open $file
++genprofile 'change_profile->':$bin/rw $exec_w $attrs_r
++do_test "no px perm" $test nochange fail $bin/open $file
+ 
+ # ONEXEC from CONFINED - don't change profile, open is run unconfined
+-genprofile 'change_profile->':$bin/rw $bin/open:rux $onexec:w signal:ALL
+-do_test "nochange rux" $bin/onexec nochange pass $bin/open $file
+-
+-# ONEXEC from CONFINED - don't change profile, open is run confined without necessary perms
+-genprofile 'change_profile->':$bin/rw $onexec:w signal:ALL -- image=$bin/open $file:rw
+-do_test "nochange px - no px perm" $bin/onexec nochange fail $bin/open $file
+-
+-# ONEXEC from CONFINED - don't change profile, open is run confined without necessary perms
+-genprofile 'change_profile->':$bin/rw $bin/open:rpx $onexec:w signal:ALL -- image=$bin/open
+-do_test "nochange px - no file perm" $bin/onexec nochange fail $bin/open $file
++genprofile 'change_profile->':$bin/rw $bin/open:rux $exec_w $attrs_r
++do_test "nochange rux" $test nochange pass $bin/open $file
++
++# ONEXEC from CONFINED - don't change profile, open is run confined without necessary perms
++genprofile 'change_profile->':$bin/rw $exec_w $attrs_r -- image=$bin/open $file:rw
++do_test "nochange px - no px perm" $test nochange fail $bin/open $file
++
++# ONEXEC from CONFINED - don't change profile, open is run confined without necessary perms
++genprofile 'change_profile->':$bin/rw $bin/open:rpx $exec_w $attrs_r -- image=$bin/open
++do_test "nochange px - no file perm" $test nochange fail $bin/open $file
+ 
+ # ONEXEC from CONFINED - target does NOT exist
+-genprofile 'change_profile->':$bin/open $onexec:w signal:ALL -- image=$bin/rw $bin/open:rix $file:rw  -- image=$bin/open
+-do_test "noexist px" $bin/onexec noexist fail $bin/open $file
++genprofile 'change_profile->':$bin/open $exec_w $attrs_r -- image=$bin/rw $bin/open:rix $file:rw  -- image=$bin/open
++do_test "noexist px" $test noexist fail $bin/open $file
+ 
+ # ONEXEC from CONFINED - change to rw profile, no exec profile to override
+-genprofile 'change_profile->':$bin/rw $onexec:w signal:ALL -- image=$bin/rw $bin/open:rix $file:rw
+-do_test "change profile - override rix" $bin/onexec $bin/rw pass $bin/open $file
++genprofile 'change_profile->':$bin/rw $exec_w $attrs_r -- image=$bin/rw $bin/open:rix $file:rw
++do_test "change profile - override rix" $test $bin/rw pass $bin/open $file
+ 
+-# ONEXEC from CONFINED - change to rw profile, no exec profile to override, no explicit access to /proc/*/attr/exec
+-genprofile 'change_profile->':$bin/rw signal:ALL -- image=$bin/rw $bin/open:rix $file:rw
+-do_test "change profile - no onexec:w" $bin/onexec $bin/rw pass $bin/open $file
++# ONEXEC from CONFINED - change to rw profile, no exec profile to override, no explicit write access to /proc/*/attr/exec
++genprofile 'change_profile->':$bin/rw $attrs_r -- image=$bin/rw $bin/open:rix $file:rw
++do_test "change profile - no exec_w" $test $bin/rw pass $bin/open $file
+ 
+ # ONEXEC from CONFINED - don't change profile, make sure exec profile is applied
+-genprofile 'change_profile->':$bin/rw $onexec:w $bin/open:rpx signal:ALL -- image=$bin/rw $bin/open:rix $file:rw  -- image=$bin/open $file:rw
+-do_test "nochange px" $bin/onexec nochange pass $bin/open $file
++genprofile 'change_profile->':$bin/rw $exec_w $attrs_r $bin/open:rpx -- image=$bin/rw $bin/open:rix $file:rw  -- image=$bin/open $file:rw
++do_test "nochange px" $test nochange pass $bin/open $file
+ 
+ # ONEXEC from CONFINED - change to rw profile, override regular exec profile, exec profile doesn't have perms
+-genprofile 'change_profile->':$bin/rw $onexec:w signal:ALL -- image=$bin/rw $bin/open:rix $file:rw  -- image=$bin/open
+-do_test "override px" $bin/onexec $bin/rw pass $bin/open $file
++genprofile 'change_profile->':$bin/rw $exec_w $attrs_r -- image=$bin/rw $bin/open:rix $file:rw  -- image=$bin/open
++do_test "override px" $test $bin/rw pass $bin/open $file
+ 
+ # ONEXEC from - change to rw profile, override regular exec profile, exec profile has perms, rw doesn't
+-genprofile 'change_profile->':$bin/rw $onexec:w signal:ALL -- image=$bin/rw $bin/open:rix  -- image=$bin/open $file:rw
+-do_test "override px" $bin/onexec $bin/rw fail $bin/open $file
++genprofile 'change_profile->':$bin/rw $exec_w $attrs_r -- image=$bin/rw $bin/open:rix  -- image=$bin/open $file:rw
++do_test "override px" $test $bin/rw fail $bin/open $file
+ 
+ # ONEXEC from COFINED - change to rw profile via glob rule, override exec profile, exec profile doesn't have perms
+-genprofile 'change_profile->':/** $onexec:w signal:ALL -- image=$bin/rw $bin/open:rix $file:rw  -- image=$bin/open
+-do_test "glob override px" $bin/onexec $bin/rw pass $bin/open $file
++genprofile 'change_profile->':/** $exec_w $attrs_r -- image=$bin/rw $bin/open:rix $file:rw  -- image=$bin/open
++do_test "glob override px" $test $bin/rw pass $bin/open $file
+ 
+ # ONEXEC from COFINED - change to exec profile via glob rule, override exec profile, exec profile doesn't have perms
+-genprofile 'change_profile->':/** $onexec:w signal:ALL -- image=$bin/rw $bin/open:rix $file:rw  -- image=$bin/open
+-do_test "glob override px" $bin/onexec $bin/open fail $bin/open $file
++genprofile 'change_profile->':/** $exec_w $attrs_r -- image=$bin/rw $bin/open:rix $file:rw  -- image=$bin/open
++do_test "glob override px" $test $bin/open fail $bin/open $file
+ 
+ # ONEXEC from COFINED - change to exec profile via glob rule, override exec profile, exec profile has perms
+-genprofile 'change_profile->':/** $onexec:w signal:ALL -- image=$bin/rw $bin/open:rix $file:rw  -- image=$bin/open $file:rw
+-do_test "glob override px" $bin/onexec $bin/rw pass $bin/open $file
++genprofile 'change_profile->':/** $exec_w $attrs_r -- image=$bin/rw $bin/open:rix $file:rw  -- image=$bin/open $file:rw
++do_test "glob override px" $test $bin/rw pass $bin/open $file
+ 
+
+=== modified file 'tests/regression/apparmor/transition.c'
+--- old/tests/regression/apparmor/transition.c	2016-05-28 16:58:41 +0000
++++ new/tests/regression/apparmor/transition.c	2016-06-25 15:24:36 +0000
+@@ -139,12 +139,16 @@
+ /**
+  * Verifies that the current confinement context matches the expected context.
+  *
++ * @attr is the file in /proc/self/attr/ that you want to verify. It is passed
++ * directly to aa_getprocattr(2).
++ *
+  * Either @expected_label or @expected_mode can be NULL if their values should
+  * not be verified. If a NULL mode is expected, as what happens when an
+  * unconfined process calls aa_getcon(2), then @expected_mode should be equal
+  * to NO_MODE.
+  */
+-static void verify_confinement_context(const char *expected_label,
++static void verify_confinement_context(const char *attr,
++				       const char *expected_label,
+ 				       const char *expected_mode)
+ {
+ 	char *label, *mode;
+@@ -152,10 +156,10 @@
+ 	bool null_expected_mode = expected_mode ?
+ 				  strcmp(NO_MODE, expected_mode) == 0 : false;
+ 
+-	rc = aa_getcon(&label, &mode);
++	rc = aa_getprocattr(getpid(), attr, &label, &mode);
+ 	if (rc < 0) {
+ 		int err = errno;
+-		fprintf(stderr, "FAIL - aa_getcon: %m");
++		fprintf(stderr, "FAIL - aa_getprocattr (%s): %m", attr);
+ 		exit(err);
+ 	}
+ 
+@@ -177,8 +181,8 @@
+ 		}
+ 
+ 		if (!compound_labels_equal(&cl, &expected_cl)) {
+-			fprintf(stderr, "FAIL - label \"%s\" != expected_label \"%s\"\n",
+-				label, expected_label);
++			fprintf(stderr, "FAIL - %s label \"%s\" != expected_label \"%s\"\n",
++				attr, label, expected_label);
+ 			rc = EINVAL;
+ 			goto err;
+ 		}
+@@ -187,8 +191,8 @@
+ 	if (expected_mode &&
+ 	    ((!mode && !null_expected_mode) ||
+ 	     (mode && strcmp(mode, expected_mode)))) {
+-		fprintf(stderr, "FAIL - mode \"%s\" != expected_mode \"%s\"\n",
+-			mode, expected_mode);
++		fprintf(stderr, "FAIL - %s mode \"%s\" != expected_mode \"%s\"\n",
++			attr, mode, expected_mode);
+ 		rc = EINVAL;
+ 		goto err;
+ 	}
+@@ -220,6 +224,18 @@
+ 	exit(EINVAL);
+ }
+ 
++static void verify_current(const char *expected_label,
++			   const char *expected_mode)
++{
++	verify_confinement_context("current", expected_label, expected_mode);
++}
++
++static void verify_exec(const char *expected_label,
++			const char *expected_mode)
++{
++	verify_confinement_context("exec", expected_label, expected_mode);
++}
++
+ static void handle_transition(int transition, const char *target)
+ {
+ 	const char *msg;
+@@ -278,24 +294,28 @@
+ static void usage(const char *prog)
+ {
+ 	fprintf(stderr,
+-		"%s: [-O <LABEL> | -P <LABEL> | -o <LABEL> | -p <LABEL>] [-l <LABEL>] [-m <MODE>] [-f <FILE>] [-- ... [-- ...]]\n"
++		"%s: [-O <LABEL> | -P <LABEL> | -o <LABEL> | -p <LABEL>] [-L <LABEL>] [-M <MODE>] [-l <LABEL>] [-m <MODE>] [-f <FILE>] [-- ... [-- ...]]\n"
+ 		"  -O <LABEL>\tCall aa_change_onexec(LABEL)\n"
+ 		"  -P <LABEL>\tCall aa_change_profile(LABEL)\n"
+ 		"  -o <LABEL>\tCall aa_stack_onexec(LABEL)\n"
+ 		"  -p <LABEL>\tCall aa_stack_profile(LABEL)\n"
+-		"  -l <LABEL>\tVerify that aa_getcon() returns LABEL\n"
+-		"  -m <MODE>\tVerify that aa_getcon() returns MODE. Set to \"%s\" if a NULL mode is expected.\n"
++		"  -L <LABEL>\tVerify that /proc/self/attr/exec contains LABEL\n"
++		"  -M <MODE>\tVerify that /proc/self/attr/exec contains MODE. Set to \"%s\" if a NULL mode is expected.\n"
++		"  -l <LABEL>\tVerify that /proc/self/attr/current contains LABEL\n"
++		"  -m <MODE>\tVerify that /proc/self/attr/current contains MODE. Set to \"%s\" if a NULL mode is expected.\n"
+ 		"  -f <FILE>\tOpen FILE and attempt to write to and read from it\n\n"
+ 		"If \"--\" is encountered, execv() will be called using the following argument\n"
+ 		"as the program to execute and passing it all of the arguments following the\n"
+-		"program name.\n", prog, NO_MODE);
++		"program name.\n", prog, NO_MODE, NO_MODE);
+ 	exit(EINVAL);
+ }
+ 
+ struct options {
+ 	const char *file;
+-	const char *expected_label;
+-	const char *expected_mode;
++	const char *expected_current_label;
++	const char *expected_current_mode;
++	const char *expected_exec_label;
++	const char *expected_exec_mode;
+ 
+ 	int transition;		/* CHANGE_PROFILE, STACK_ONEXEC, etc. */
+ 	const char *target;	/* The target label of the transition */
+@@ -321,16 +341,22 @@
+ 	int o;
+ 
+ 	memset(opts, 0, sizeof(*opts));
+-	while ((o = getopt(argc, argv, "f:l:m:O:P:o:p:")) != -1) {
++	while ((o = getopt(argc, argv, "f:L:M:l:m:O:P:o:p:")) != -1) {
+ 		switch (o) {
+ 		case 'f': /* file */
+ 			opts->file = optarg;
+ 			break;
+-		case 'l': /* expected label */
+-			opts->expected_label = optarg;
+-			break;
+-		case 'm': /* expected mode */
+-			opts->expected_mode = optarg;
++		case 'L': /* expected exec label */
++			opts->expected_exec_label = optarg;
++			break;
++		case 'M': /* expected exec mode */
++			opts->expected_exec_mode = optarg;
++			break;
++		case 'l': /* expected current label */
++			opts->expected_current_label = optarg;
++			break;
++		case 'm': /* expected current mode */
++			opts->expected_current_mode = optarg;
+ 			break;
+ 		case 'O': /* aa_change_profile */
+ 			set_transition(prog, opts, CHANGE_ONEXEC, optarg);
+@@ -371,9 +397,12 @@
+ 	if (opts.file)
+ 		file_io(opts.file);
+ 
+-	if (opts.expected_label || opts.expected_mode)
+-		verify_confinement_context(opts.expected_label,
+-					   opts.expected_mode);
++	if (opts.expected_current_label || opts.expected_current_mode)
++		verify_current(opts.expected_current_label,
++			       opts.expected_current_mode);
++
++	if (opts.expected_exec_label || opts.expected_exec_mode)
++		verify_exec(opts.expected_exec_label, opts.expected_exec_mode);
+ 
+ 	if (opts.exec)
+ 		exec(opts.exec, opts.exec_argv);
+

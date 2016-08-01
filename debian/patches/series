@@ -1,0 +1,45 @@
+#
+# Debian-specific patches
+#
+# not on Ubuntu
+#notify-group.patch
+
+#
+# Ubuntu-specific patches
+#
+add-debian-integration-to-lighttpd.patch
+ubuntu-manpage-updates.patch
+libapparmor-layout-deb.patch
+etc-writable.patch
+aa-utils_are_bilingual.patch
+parser-include-usr-share-apparmor.patch
+parser-dont-skip-read-cache-with-optimizations.patch
+
+#
+# Patches not yet upstream
+#
+add-chromium-browser.patch
+pass-compiler-flags.patch
+raise-test-timeout.patch
+non-linux.patch
+
+#
+# Patches backported from upstream commits
+#
+r3424-nscd-profile-allow-paranoia-mode.patch
+r3425-adjust-stacking-tests-version-check.patch
+r3426-allow-debugedit-to-work-on-apparmor-parser.patch
+r3435-allow-dnsmasq-access-to-lxd-bridge.patch
+r3437-add-attach-disconnected-to-dnsmasq.patch
+r3460-ignore-file-events-with-send-or-receive-request.patch
+r3463-r3475-change-profile-exec-modes.patch
+r3478-make-overlapping-safe-and-unsafe-rules-conflict.patch
+r3488-r3489-fix-racy-onexec-test.patch
+r3490-utils-handle-change-profile-exec-modes.patch
+r3492-allow-dbus-user-session-path.patch
+r3498-r3499-ignore-net-events-that-look-like-file-events.patch
+
+#
+# Patches backported from upstream fix submissions
+#
+allow-stacking-tests-to-use-system.patch
