@@ -14,6 +14,7 @@ etc-writable.patch
 aa-utils_are_bilingual.patch
 parser-include-usr-share-apparmor.patch
 parser-dont-skip-read-cache-with-optimizations.patch
+allow-access-to-ibus-socket.patch
 
 #
 # Patches not yet upstream
@@ -29,6 +30,7 @@ non-linux.patch
 r3424-nscd-profile-allow-paranoia-mode.patch
 r3425-adjust-stacking-tests-version-check.patch
 r3426-allow-debugedit-to-work-on-apparmor-parser.patch
+allow-stacking-tests-to-use-system.patch
 r3435-allow-dnsmasq-access-to-lxd-bridge.patch
 r3437-add-attach-disconnected-to-dnsmasq.patch
 r3460-ignore-file-events-with-send-or-receive-request.patch
@@ -38,8 +40,11 @@ r3488-r3489-fix-racy-onexec-test.patch
 r3490-utils-handle-change-profile-exec-modes.patch
 r3492-allow-dbus-user-session-path.patch
 r3498-r3499-ignore-net-events-that-look-like-file-events.patch
+r3505-tests-fix-stacking-mode-checks.patch
+r3509-tests-fix-exec_stack-errors-1.patch
+r3558-tests-fix-exec_stack-errors-2.patch
 
 #
 # Patches backported from upstream fix submissions
 #
-allow-stacking-tests-to-use-system.patch
+utils-add-aa-remove-unknown.patch

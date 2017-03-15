@@ -1,3 +1,60 @@
+apparmor (2.10.95-0ubuntu2.6) xenial-security; urgency=medium
+
+  * SECURITY UPDATE: Don't unload unknown profiles during package
+    configuration or when restarting the apparmor init script or upstart job
+    as this could leave processes unconfined (LP: #1668892)
+    - debian/apparmor.postinst, debian/apparmor.init, debian/apparmor.upstart:
+      Remove calls to unload_obsolete_profiles()
+    - debian/patches/utils-add-aa-remove-unknown.patch,
+      debian/apparmor.install debian/apparmor.manpages: Include a new utility,
+      aa-remove-unknown, which can be used to unload unknown profiles
+    - CVE-2017-6507
+
+ -- Tyler Hicks <tyhicks@canonical.com>  Wed, 15 Mar 2017 22:07:02 +0000
+
+apparmor (2.10.95-0ubuntu2.5) xenial; urgency=medium
+
+  * debian/lib/apparmor/functions, debian/apparmor.init,
+    debian/apparmor.service, debian/apparmor.upstart,
+    debian/lib/apparmor/profile-load: Adjust the checks that previously kept
+    AppArmor policy from being loaded while booting a container. Now we
+    attempt to load policy if we're in a LXD or LXC managed container that is
+    using profile stacking inside of a policy namespace. (LP: #1628285)
+  * Fix regression tests for stacking so that the kernel SRU process is not
+    interrupted by failing tests whenever the AppArmor stacking features are
+    backported from the 16.10 kernel or when the 16.04 LTS Enablement Stack
+    receives a 4.8 or newer kernel
+    - debian/patches/r3509-tests-fix-exec_stack-errors-1.patch: Fix the
+      exec_stack.sh test when running on 4.8 or newer kernels (LP: #1628745)
+    - debian/patches/r3558-tests-fix-exec_stack-errors-2.patch: Adjust the
+      exec_stack.sh fix mentioned above to more accurately test kernels older
+      than 4.8 (LP: #1630069)
+    - debian/patches/allow-stacking-tests-to-use-system.patch: Apply this
+      patch earlier in the series, as to match when it was committed upstream,
+      so that the above two patches can be cherry-picked from lp:apparmor
+
+ -- Tyler Hicks <tyhicks@canonical.com>  Fri, 07 Oct 2016 05:21:44 +0000
+
+apparmor (2.10.95-0ubuntu2.4) xenial; urgency=medium
+
+  * debian/patches/r3505-tests-fix-stacking-mode-checks.patch: Fix failing
+    regression tests so that the kernel SRU process is not interrupted by
+    failing stackonexec.sh and stackprofile.sh tests (LP: #1628295)
+
+ -- Tyler Hicks <tyhicks@canonical.com>  Wed, 28 Sep 2016 15:33:53 -0500
+
+apparmor (2.10.95-0ubuntu2.3) xenial; urgency=medium
+
+  * debian/patches/allow-access-to-ibus-socket.patch: Adjust the ibus
+    abstraction to allow access to the abstract UNIX domain socket location
+    used in Ubuntu. (LP: #1580463)
+  * debian/lib/apparmor/functions: Quiet the "Files ... and ... differ"
+    output, during the update process, which was printed by diff. This message
+    left users concerned since it mentioned md5sums files without being clear
+    about what was happening. (LP: #1614215)
+
+ -- Tyler Hicks <tyhicks@canonical.com>  Fri, 26 Aug 2016 18:30:32 -0500
+
 apparmor (2.10.95-0ubuntu2.2) xenial; urgency=medium
 
   * r3498-r3499-ignore-net-events-that-look-like-file-events.patch: Prevent an

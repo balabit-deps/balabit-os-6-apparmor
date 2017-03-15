@@ -113,7 +113,6 @@ case "$1" in
         if aa-status --enabled 2>/dev/null; then
             clear_cache || true
             load_configured_profiles || true
-            unload_obsolete_profiles || true
         fi
 
         # Discard the return code and just make sure the md5sums are updated

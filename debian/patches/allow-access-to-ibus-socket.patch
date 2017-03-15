@@ -1,0 +1,22 @@
+Description: Allow access to the Ubuntu-specific path for ibus-daemon
+ im-config, in Ubuntu, was modified to start the ibus-daemon with the
+ "--address 'unix:tmpdir=/tmp/ibus'" command line option. It previously
+ used a UNIX domain socket path that was indistinguishable from the
+ session bus daemon's path. This patch adjusts the ibus abstraction so
+ that access to the new path can be granted to confined ibus-daemon
+ client applications.
+Author: Jamie Strandboge <jamie@ubuntu.com>
+Bug-Ubuntu: https://launchpad.net/bugs/1580463
+Forwarded: not-needed
+Index: apparmor-2.10.95/profiles/apparmor.d/abstractions/ibus
+===================================================================
+--- apparmor-2.10.95.orig/profiles/apparmor.d/abstractions/ibus
++++ apparmor-2.10.95/profiles/apparmor.d/abstractions/ibus
+@@ -13,3 +13,7 @@
+   owner @{HOME}/.config/ibus/ r,
+   owner @{HOME}/.config/ibus/bus/ rw,
+   owner @{HOME}/.config/ibus/bus/* rw,
++
++  unix (connect, receive, send)
++       type=stream
++       peer=(addr="@/tmp/ibus/dbus-*"),

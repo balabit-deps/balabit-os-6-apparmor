@@ -1,0 +1,68 @@
+Description: tests: Fix exec_stack.sh errors under 4.8 and newer kernels
+ .
+ https://launchpad.net/bugs/1628745
+ .
+ The following upstream kernel commit changed the semantics of the exec
+ permission check in the 4.8 kernel:
+ .
+  commit 9f834ec18defc369d73ccf9e87a2790bfa05bf46
+  Author: Linus Torvalds <torvalds@linux-foundation.org>
+  Date: Mon Aug 22 16:41:46 2016 -0700
+ .
+      binfmt_elf: switch to new creds when switching to new mm
+ .
+ That change means that the target profile of an exec transition must
+ have permission to map the binary being executed. This patch fixes
+ regression test failures while the exec_stack.sh test is running against
+ 4.8 and newer kernels by granting mapping permission to the target
+ profile.
+ .
+ Signed-off-by: Tyler Hicks <tyhicks@canonical.com>
+ Acked-by: Seth Arnold <seth.arnold@canonical.com>
+ Acked-by: John Johansen <john.johansen@canonical.com>
+Origin: commit, revision id: tyhicks@canonical.com-20160929041129-fq31m9efea87iue0
+Author: Tyler Hicks <tyhicks@canonical.com>
+Bug: https://launchpad.net/bugs/1628745
+Last-Update: 2016-09-29
+X-Bzr-Revision-Id: tyhicks@canonical.com-20160929041129-fq31m9efea87iue0
+
+=== modified file 'tests/regression/apparmor/exec_stack.sh'
+--- old/tests/regression/apparmor/exec_stack.sh	2016-05-28 16:58:41 +0000
++++ new/tests/regression/apparmor/exec_stack.sh	2016-09-29 04:11:29 +0000
+@@ -66,7 +66,7 @@
+ 
+ # Verify file access and contexts by 2 stacked profiles
+ genprofile -I $fileok $sharedok $getcon $test:"ix -> &$othertest" -- \
+-	image=$othertest addimage:$test $otherok $sharedok $getcon $test:r
++	image=$othertest addimage:$test $otherok $sharedok $getcon $test:rm
+ runchecktest_errno EACCES "EXEC_STACK (2 stacked - file)" fail -- $test -f $file
+ runchecktest_errno EACCES "EXEC_STACK (2 stacked - otherfile)" fail -- $test -f $otherfile
+ runchecktest_errno EACCES "EXEC_STACK (2 stacked - thirdfile)" fail -- $test -f $thirdfile
+@@ -79,7 +79,7 @@
+ # Verify file access and contexts by 3 stacked profiles
+ genprofile -I $fileok $sharedok $getcon $test:"ix -> &$othertest" -- \
+ 	image=$othertest addimage:$test $otherok $sharedok $getcon $test:"rix -> &$thirdtest" -- \
+-	image=$thirdtest addimage:$test $thirdok $sharedok $getcon $test:r
++	image=$thirdtest addimage:$test $thirdok $sharedok $getcon $test:rm
+ runchecktest_errno EACCES "EXEC_STACK (3 stacked - file)" fail -- $test -- $test -f $file
+ runchecktest_errno EACCES "EXEC_STACK (3 stacked - otherfile)" fail -- $test -- $test -f $otherfile
+ runchecktest_errno EACCES "EXEC_STACK (3 stacked - thirdfile)" fail -- $test -- $test -f $thirdfile
+@@ -89,7 +89,7 @@
+ 
+ genprofile -I $sharedok $stackotherok $stackthirdok $test:"rix -> &$othertest" -- \
+ 	image=$othertest addimage:$test $sharedok $stackthirdok $test:"rix -> &$thirdtest" -- \
+-	image=$thirdtest addimage:$test $sharedok $stackthirdok $test:r
++	image=$thirdtest addimage:$test $sharedok $stackthirdok $test:rm
+ # Triggered an AppArmor WARN in the initial stacking patch set
+ runchecktest "EXEC_STACK (3 stacked - old AA WARN)" pass -p $othertest -- $test -p $thirdtest -f $sharedfile
+ 
+@@ -120,7 +120,7 @@
+ 
+ # Verify file access and contexts in mixed mode
+ genprofile -I $fileok $sharedok $getcon $test:"ix -> &$othertest" -- \
+-	image=$othertest flag:complain addimage:$test $otherok $sharedok $getcon $test:r
++	image=$othertest flag:complain addimage:$test $otherok $sharedok $getcon $test:rm
+ runchecktest "EXEC_STACK (mixed mode - file)" pass -- $test -f $file
+ runchecktest_errno EACCES "EXEC_STACK (mixed mode - otherfile)" fail -- $test -f $otherfile
+ runchecktest "EXEC_STACK (mixed mode - sharedfile)" pass -- $test -f $sharedfile
+

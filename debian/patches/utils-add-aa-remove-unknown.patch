@@ -1,0 +1,211 @@
+From d9e170554cf565619d31da1f7294061fbb1dce3e Mon Sep 17 00:00:00 2001
+From: Tyler Hicks <tyhicks@canonical.com>
+Date: Fri, 10 Mar 2017 23:40:03 +0000
+Subject: [PATCH] utils: Add aa-remove-unknown utility to unload unknown profiles
+
+https://launchpad.net/bugs/1668892
+
+This patch creates a new utility, with the code previously used in the
+init script 'restart' action, that removes unknown profiles which are
+not found in /etc/apparmor.d/. The functionality was removed from the
+common init script code in the fix for CVE-2017-6507.
+
+The new utility prints a message containing the name of each unknown
+profile before the profiles are removed. It also supports a dry run mode
+so that an administrator can check which profiles will be removed before
+unloading any unknown profiles.
+
+If you backport this utility with the fix for CVE-2017-6507 to an
+apparmor 2.10 release, you'll want to include the following bug fix to
+prevent the aa-remove-unknown utility from removing child profiles that
+it shouldn't remove:
+
+  r3440 - Fix: parser: incorrect output of child profile names
+
+Signed-off-by: Tyler Hicks <tyhicks@canonical.com>
+---
+ utils/Makefile              |   2 +-
+ utils/aa-remove-unknown     | 108 ++++++++++++++++++++++++++++++++++++++++++++
+ utils/aa-remove-unknown.pod |  51 +++++++++++++++++++++
+ 3 files changed, 160 insertions(+), 1 deletion(-)
+ create mode 100755 utils/aa-remove-unknown
+ create mode 100644 utils/aa-remove-unknown.pod
+
+Index: apparmor-2.10.95/utils/Makefile
+===================================================================
+--- apparmor-2.10.95.orig/utils/Makefile
++++ apparmor-2.10.95/utils/Makefile
+@@ -24,7 +24,7 @@ PERLTOOLS = aa-notify
+ PYTOOLS = aa-easyprof aa-genprof aa-logprof aa-cleanprof aa-mergeprof \
+           aa-autodep aa-audit aa-complain aa-enforce aa-disable \
+ 	  aa-status aa-unconfined
+-TOOLS = ${PERLTOOLS} ${PYTOOLS} aa-decode
++TOOLS = ${PERLTOOLS} ${PYTOOLS} aa-decode aa-remove-unknown
+ PYSETUP = python-tools-setup.py
+ PYMODULES = $(wildcard apparmor/*.py apparmor/rule/*.py)
+ 
+Index: apparmor-2.10.95/utils/aa-remove-unknown
+===================================================================
+--- /dev/null
++++ apparmor-2.10.95/utils/aa-remove-unknown
+@@ -0,0 +1,104 @@
++#!/bin/sh
++# ----------------------------------------------------------------------
++#    Copyright (c) 2017 Canonical Ltd. (All rights reserved)
++#
++#    This program is free software; you can redistribute it and/or
++#    modify it under the terms of version 2 of the GNU General Public
++#    License published by the Free Software Foundation.
++#
++#    This program is distributed in the hope that it will be useful,
++#    but WITHOUT ANY WARRANTY; without even the implied warranty of
++#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++#    GNU General Public License for more details.
++#
++#    You should have received a copy of the GNU General Public License
++#    along with this program. If not, see <http://www.gnu.org/licenses/>.
++# ----------------------------------------------------------------------
++
++APPARMOR_FUNCTIONS=/lib/apparmor/functions
++APPARMORFS=/sys/kernel/security/apparmor
++PROFILES_IFACE="${APPARMORFS}/profiles"
++REMOVE="${APPARMORFS}/.remove"
++
++DRY_RUN=0
++
++. $APPARMOR_FUNCTIONS
++
++usage() {
++	local progname="$1"
++	local rc="$2"
++	local msg="usage: ${progname} [options]\n
++Remove profiles unknown to the system
++
++Options:
++ -h, --help	Show this help message and exit
++ -n		Dry run; don't remove profiles"
++
++	if [ "$rc" -ne 0 ] ; then
++		echo "$msg" 1>&2
++	else
++		echo "$msg"
++	fi
++
++	exit "$rc"
++}
++
++if [ "$#" -gt 1 ] ; then
++	usage "$0" 1
++elif [ "$#" -eq 1 ] ; then
++	if [ "$1" = "-h" -o "$1" = "--help" ] ; then
++		usage "$0" 0
++	elif [ "$1" = "-n" ] ; then
++		DRY_RUN=1
++	else
++		usage "$0" 1
++	fi
++fi
++
++
++# We can't use a -r test here because while $PROFILES_IFACE is world-readable,
++# apparmorfs may still return EACCES from open()
++#
++# We have to do this check because error checking awk's getline() below is
++# tricky and, as is, results in an infinite loop when apparmorfs returns an
++# error from open().
++if ! IFS= read line < "$PROFILES_IFACE" ; then
++	echo "ERROR: Unable to read apparmorfs profiles file" 1>&2
++	exit 1
++elif [ ! -w "$REMOVE" ] ; then
++	echo "ERROR: Unable to write to apparmorfs remove file" 1>&2
++	exit 1
++fi
++
++# Clean out running profiles not associated with the current profile
++# set, excluding the libvirt dynamically generated profiles.
++aa_configured=$(mktemp -t aa-XXXXXX)
++configured_profile_names > "$aa_configured"
++if [ "$?" -ne 0 ] ; then
++	echo "ERROR: Unable to enumerate the known profiles" 1>&2
++	rm -f "$aa_configured" "$aa_loaded"
++	exit 1
++fi
++
++aa_loaded=$(mktemp -t aa-XXXXXX)
++running_profile_names > "$aa_loaded" || true
++if [ "$?" -ne 0 ] ; then
++	echo "ERROR: Unable to enumerate the running profiles" 1>&2
++	rm -f "$aa_configured" "$aa_loaded"
++	exit 1
++fi
++
++LC_COLLATE=C comm -2 -3 "$aa_loaded" "$aa_configured" | while read profile ; do
++	if [ "$DRY_RUN" -ne 0 ]; then
++		echo "Would remove '${profile}'"
++	else
++		echo "Removing '${profile}'"
++		unload_profile "$profile"
++	fi
++done
++ret="$?"
++
++rm -f "$aa_configured" "$aa_loaded"
++
++# will not catch all errors, but still better than nothing
++exit $ret
+Index: apparmor-2.10.95/utils/aa-remove-unknown.pod
+===================================================================
+--- /dev/null
++++ apparmor-2.10.95/utils/aa-remove-unknown.pod
+@@ -0,0 +1,51 @@
++=pod
++
++=head1 NAME
++
++aa-remove-unknown - remove unknown AppArmor profiles
++
++=head1 SYNOPSIS
++
++B<aa-remove-unknown> [option]
++
++=head1 DESCRIPTION
++
++B<aa-remove-unknown> will inventory all profiles in /etc/apparmor.d/, compare
++that list to the profiles currently loaded into the kernel, and then remove all
++of the loaded profiles that were not found in /etc/apparmor.d/. It will also
++report the name of each profile that it removes on standard out.
++
++=head1 OPTIONS
++
++=over 4
++
++=item -h, --help
++
++displays a short usage statement.
++
++=item -n
++
++dry run; only prints the names of profiles that would be removed
++
++=back
++
++=head1 EXAMPLES
++
++  $ sudo ./aa-remove-unknown -n
++  Would remove 'test//null-/usr/bin/whoami'
++  Would remove 'test'
++
++  $ sudo ./aa-remove-unknown
++  Removing 'test//null-/usr/bin/whoami'
++  Removing 'test'
++
++=head1 BUGS
++
++None. Please report any you find to Launchpad at
++L<https://bugs.launchpad.net/apparmor/+filebug>.
++
++=head1 SEE ALSO
++
++apparmor(7)
++
++=cut

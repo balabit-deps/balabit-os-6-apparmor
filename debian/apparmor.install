@@ -6,6 +6,7 @@ etc/apparmor/subdomain.conf
 sbin/apparmor_parser
 usr/bin/aa-enabled
 usr/bin/aa-exec /usr/sbin/
+usr/sbin/aa-remove-unknown
 usr/sbin/aa-status
 usr/sbin/apparmor_status
 etc/apparmor.d/tunables/alias

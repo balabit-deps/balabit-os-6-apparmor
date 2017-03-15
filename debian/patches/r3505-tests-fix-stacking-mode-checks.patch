@@ -1,0 +1,77 @@
+Description: Previously a stack with unconfined would cause the mode to be reported as mixed
+ .
+   profile_A//&:ns1://unconfined (mixed)
+ .
+ this is confusing and can even break some trusted helpers. The unconfined
+ profile has been special cased and now will report enforce when stacking
+ with unconfined
+   profile_A//&:ns1://unconfined (enforce)
+ .
+ This patch fixes the regression tests to work with this change
+ .
+ Signed-off-by: John Johansen <john.johansen@canonical.com>
+ Acked-by: Seth Arnold <seth.arnold@canonical.com>
+Origin: commit, revision id: john.johansen@canonical.com-20160903012219-wy0y5h7cvqlwp42l
+Author: John Johansen <john.johansen@canonical.com>
+Last-Update: 2016-09-03
+X-Bzr-Revision-Id: john.johansen@canonical.com-20160903012219-wy0y5h7cvqlwp42l
+Bug-Ubuntu: https://launchpad.net/bugs/1628295
+
+=== modified file 'tests/regression/apparmor/socketpair.sh'
+--- old/tests/regression/apparmor/socketpair.sh	2015-06-02 08:00:29 +0000
++++ new/tests/regression/apparmor/socketpair.sh	2016-09-03 01:22:19 +0000
+@@ -19,6 +19,8 @@
+ 
+ . $bin/prologue.inc
+ 
++requires_kernel_features network/af_unix
++
+ do_test()
+ {
+ 	local desc="SOCKETPAIR ($1)"
+
+=== modified file 'tests/regression/apparmor/stackonexec.sh'
+--- old/tests/regression/apparmor/stackonexec.sh	2016-05-28 16:58:41 +0000
++++ new/tests/regression/apparmor/stackonexec.sh	2016-09-03 01:22:19 +0000
+@@ -71,9 +71,9 @@
+ runchecktest "STACKONEXEC (stacked with unconfined - otherfile)" pass -o $othertest -- $test -f $otherfile
+ runchecktest "STACKONEXEC (stacked with unconfined - sharedfile)" pass -o $othertest -- $test -f $sharedfile
+ 
+-runchecktest "STACKONEXEC (stacked with unconfined - okcon)" pass -o $othertest -- $test -l "unconfined//&${othertest}" -m mixed
+-runchecktest "STACKONEXEC (stacked with unconfined - bad label)" fail -o $othertest -- $test -l "${test}//&${othertest}" -m mixed
+-runchecktest "STACKONEXEC (stacked with unconfined - bad mode)" fail -o $othertest -- $test -l "unconfined//&${othertest}" -m enforce
++runchecktest "STACKONEXEC (stacked with unconfined - okcon)" pass -o $othertest -- $test -l "unconfined//&${othertest}" -m enforce
++runchecktest "STACKONEXEC (stacked with unconfined - bad label)" fail -o $othertest -- $test -l "${test}//&${othertest}" -m enforce
++runchecktest "STACKONEXEC (stacked with unconfined - bad mode)" fail -o $othertest -- $test -l "unconfined//&${othertest}" -m "(null)"
+ 
+ removeprofile
+ # Verify that stacking a nonexistent file is properly handled
+
+=== modified file 'tests/regression/apparmor/stackprofile.sh'
+--- old/tests/regression/apparmor/stackprofile.sh	2016-05-28 16:58:41 +0000
++++ new/tests/regression/apparmor/stackprofile.sh	2016-09-03 01:22:19 +0000
+@@ -70,8 +70,8 @@
+ runchecktest "STACKPROFILE (stacked with unconfined - otherfile)" pass -p $othertest -f $otherfile
+ runchecktest "STACKPROFILE (stacked with unconfined - sharedfile)" pass -p $othertest -f $sharedfile
+ 
+-runchecktest "STACKPROFILE (stacked with unconfined - okcon)" pass -p $othertest -l "unconfined//&${othertest}" -m mixed
+-runchecktest "STACKPROFILE (stacked with unconfined - bad label)" fail -p $othertest -l "${test}//&${othertest}" -m mixed
++runchecktest "STACKPROFILE (stacked with unconfined - okcon)" pass -p $othertest -l "unconfined//&${othertest}" -m enforce
++runchecktest "STACKPROFILE (stacked with unconfined - bad label)" fail -p $othertest -l "${test}//&${othertest}" -m enforce
+ runchecktest "STACKPROFILE (stacked with unconfined - bad mode)" fail -p $othertest -l "unconfined//&${othertest}" -m '(null)'
+ 
+ removeprofile
+
+=== modified file 'tests/regression/apparmor/xattrs.sh'
+--- old/tests/regression/apparmor/xattrs.sh	2010-12-20 20:29:10 +0000
++++ new/tests/regression/apparmor/xattrs.sh	2016-09-03 01:22:19 +0000
+@@ -36,6 +36,8 @@
+ 
+ . $bin/prologue.inc
+ 
++requires_kernel_features file/xattr
++
+ tmpmount=$tmpdir/mountpoint
+ diskimg=$tmpdir/disk.img
+ file=$tmpmount/testfile
+

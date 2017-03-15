@@ -3,7 +3,7 @@ Description: Allow stacking tests to use system programs and libraries
  but the tests unexpectedly failed when USE_SYSTEM=1 was specified. This
  patch makes use of the addimage:$test argument to mkprofile.pl to
  generate the correct file permissions needed to use the system binaries.
-Forwarded: https://lists.ubuntu.com/archives/apparmor/2016-March/009492.html
+Origin: upstream, https://bazaar.launchpad.net/~apparmor-dev/apparmor/master/revision/3430
 Author: Tyler Hicks <tyhicks@canonical.com>
 ---
  tests/regression/apparmor/exec_stack.sh   | 14 +++++++-------

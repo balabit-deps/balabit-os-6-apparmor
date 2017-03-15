@@ -9,7 +9,10 @@ script
     [ -d /rofs/etc/apparmor.d ]  && exit 0 # do not load on liveCD
     [ -d /sys/module/apparmor ]  || exit 0 # do not load without AppArmor
     [ -x /sbin/apparmor_parser ] || exit 0 # do not load without parser
-    systemd-detect-virt --quiet --container && exit 0 || true
+
+    . /lib/apparmor/functions
+
+    systemd-detect-virt --quiet --container && ! is_container_with_internal_policy && exit 0 || true
 
     # Need securityfs for any mode
     if [ ! -d /sys/kernel/security/apparmor ]; then
@@ -21,8 +24,6 @@ script
     fi
 
     [ -w /sys/kernel/security/apparmor/.load ] || exit 0
-
-    . /lib/apparmor/functions
 
     apparmor_was_updated=0
     if ! compare_previous_version ; then
@@ -82,7 +83,6 @@ script
     if [ "$ACTION" = "reload" ] || [ "$ACTION" = "force-reload" ]; then
         clear_cache
         load_configured_profiles
-	unload_obsolete_profiles
         exit 0
     fi
 
