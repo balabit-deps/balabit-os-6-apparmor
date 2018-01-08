@@ -1,3 +1,19 @@
+apparmor (2.10.95-0ubuntu2.8) xenial; urgency=medium
+
+  * d/p/0001-Allow-seven-digit-pid.patch:
+    On 64bit systems, /proc/sys/kernel/pid_max can be set to PID_MAX_LIMIT,
+    (2^22), which results in seven digit pids. Adjust the @{PID} variable in
+    tunables/global to accept this. (LP: #1717714)
+
+ -- Seyeong Kim <seyeong.kim@canonical.com>  Mon, 08 Jan 2018 07:43:46 -0800
+
+apparmor (2.10.95-0ubuntu2.7) xenial; urgency=medium
+
+  * Remove initramfs-tools from the dependencies; this isn't used and the
+    dependency has been dropped in later releases.  LP: #1713169.
+
+ -- Steve Langasek <steve.langasek@ubuntu.com>  Fri, 25 Aug 2017 16:54:53 -0700
+
 apparmor (2.10.95-0ubuntu2.6) xenial-security; urgency=medium
 
   * SECURITY UPDATE: Don't unload unknown profiles during package

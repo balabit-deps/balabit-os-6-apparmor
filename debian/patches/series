@@ -48,3 +48,4 @@ r3558-tests-fix-exec_stack-errors-2.patch
 # Patches backported from upstream fix submissions
 #
 utils-add-aa-remove-unknown.patch
+0001-Allow-seven-digit-pid.patch

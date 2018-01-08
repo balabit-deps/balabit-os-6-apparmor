@@ -1,0 +1,22 @@
+Description: Allow seven digit pid
+ On 64bit systems, /proc/sys/kernel/pid_max can be set to PID_MAX_LIMIT,
+ (2^22), which results in seven digit pids. Adjust the @{PID} variable in
+ tunables/global to accept this.
+
+Author: Vincas Dargis <vindrg@gmail.com>
+Origin: upstream, http://bazaar.launchpad.net/~apparmor-dev/apparmor/master/revision/3722
+Bug-Debian: https://bugs.debian.org/cgi-bin/bugreport.cgi?bug=886732
+Bug-Ubuntu: https://bugs.launchpad.net/bugs/1717714
+Index: apparmor-2.10.95/profiles/apparmor.d/tunables/kernelvars
+===================================================================
+--- apparmor-2.10.95.orig/profiles/apparmor.d/tunables/kernelvars
++++ apparmor-2.10.95/profiles/apparmor.d/tunables/kernelvars
+@@ -13,7 +13,7 @@
+ # and until the parser supports nested groupings like
+ #   @{pid}=[1-9]{[0-9]{[0-9]{[0-9]{[0-9]{[0-9],},},},},}
+ # use
+-@{pid}={[1-9],[1-9][0-9],[1-9][0-9][0-9],[1-9][0-9][0-9][0-9],[1-9][0-9][0-9][0-9][0-9],[1-9][0-9][0-9][0-9][0-9][0-9]}
++@{pid}={[1-9],[1-9][0-9],[1-9][0-9][0-9],[1-9][0-9][0-9][0-9],[1-9][0-9][0-9][0-9][0-9],[1-9][0-9][0-9][0-9][0-9][0-9],[1-4][0-9][0-9][0-9][0-9][0-9][0-9]}
+ 
+ #same pattern as @{pid} for now
+ @{tid}=@{pid}
