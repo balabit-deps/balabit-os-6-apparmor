@@ -1,3 +1,11 @@
+apparmor (2.10.95-0ubuntu2.9) xenial; urgency=medium
+
+  * debian/patches/base-journald-updates.patch: update base abstraction
+    for additional journald sockets (LP: #1670408)
+    Backport from 2.11.0-2ubuntu5 by Jamie Strandboge <jamie@ubuntu.com>
+
+ -- Christian Ehrhardt <christian.ehrhardt@canonical.com>  Tue, 20 Feb 2018 16:04:02 +0100
+
 apparmor (2.10.95-0ubuntu2.8) xenial; urgency=medium
 
   * d/p/0001-Allow-seven-digit-pid.patch:

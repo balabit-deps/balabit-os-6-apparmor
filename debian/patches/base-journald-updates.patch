@@ -1,0 +1,33 @@
+Author: Jamie Strandboge <jamie@canonical.com>
+Description: update base abstraction for additional journald sockets
+ The base abstraction already allows write access to
+ /run/systemd/journal/dev-log but journald offers both:
+ - a native journal API at /run/systemd/journal/socket (see
+   sd_journal_print(4))
+ - /run/systemd/journal/stdout for connecting a program's output to the
+   journal
+   (see systemd-cat(1)).
+ .
+ In addition to systemd-cat, the stdout access is required for nested container
+ (eg, LXD) logs to show up in the host. Interestingly, systemd-cat and LXD
+ containers require 'r' in addtion to 'w' to work. journald does not allow
+ reading log entries from this socket so the access is deemed safe.
+Forwarded: yes
+
+Index: apparmor-2.11.0/profiles/apparmor.d/abstractions/base
+===================================================================
+--- apparmor-2.11.0.orig/profiles/apparmor.d/abstractions/base
++++ apparmor-2.11.0/profiles/apparmor.d/abstractions/base
+@@ -35,6 +35,12 @@
+   /usr/share/zoneinfo/**         r,
+   /usr/share/X11/locale/**       r,
+   /{,var/}run/systemd/journal/dev-log w,
++  # systemd native journal API (see sd_journal_print(4))
++  /{,var/}run/systemd/journal/socket w,
++  # Nested containers and anything using systemd-cat need this. 'r' shouldn't
++  # be required but applications fail without it. journald doesn't leak
++  # anything when reading so this is ok.
++  /{,var/}run/systemd/journal/stdout rw,
+ 
+   /usr/lib{,32,64}/locale/**             mr,
+   /usr/lib{,32,64}/gconv/*.so            mr,
