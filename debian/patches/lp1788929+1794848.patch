@@ -1,0 +1,103 @@
+Origin: d1937093f7fe86786bfcd341d312f7a0e4cb18e9,
+ 503d2904dc09a076424815dfd5bd30e1e3c18931,
+ ea2429dab5f41d132d7899ca75cf3e8b929d6194,
+ 5efd257585b957ccce9fbca359c8f89ef3aea7c5,
+ afdd4f2189655373ee72275750254df652d4839c,
+ bbe0f9af78eea8a6fc04beb98939af85ff36ff12,
+ 6e014ab8a99f105092614437e0e622075af0c889
+Description: various hardening for thumbnailer and when blacklisting:
+ - abstractions/private-files: disallow writes to thumbnailer dir
+ - abstractions/private-files-strict: disallow access to the dirs of private
+   files
+ - abstractions/ubuntu-browsers.d/user-files: disallow access to the dirs of
+   private files
+Bug: https://launchpad.net/bugs/1788929, https://launchpad.net/bugs/1794820
+
+Index: apparmor-2.12/profiles/apparmor.d/abstractions/private-files
+===================================================================
+--- apparmor-2.12.orig/profiles/apparmor.d/abstractions/private-files
++++ apparmor-2.12/profiles/apparmor.d/abstractions/private-files
+@@ -13,13 +13,18 @@
+   deny @{HOME}/.*.bak mrwkl,
+ 
+   # special attention to (potentially) executable files
+-  audit deny @{HOME}/bin/** wl,
+-  audit deny @{HOME}/.config/autostart/** wl,
+-  audit deny @{HOME}/.config/upstart/** wl,
+-  audit deny @{HOME}/.init/** wl,
+-  audit deny @{HOME}/.kde{,4}/Autostart/** wl,
+-  audit deny @{HOME}/.kde{,4}/env/** wl,
+-  audit deny @{HOME}/.pki/nssdb/*.so{,.[0-9]*} wl,
++  audit deny @{HOME}/bin/{,**} wl,
++  audit deny @{HOME}/.config/ w,
++  audit deny @{HOME}/.config/autostart/{,**} wl,
++  audit deny @{HOME}/.config/upstart/{,**} wl,
++  audit deny @{HOME}/.init/{,**} wl,
++  audit deny @{HOME}/.kde{,4}/ w,
++  audit deny @{HOME}/.kde{,4}/Autostart/{,**} wl,
++  audit deny @{HOME}/.kde{,4}/env/{,**} wl,
++  audit deny @{HOME}/.local/{,share/} w,
++  audit deny @{HOME}/.local/share/thumbnailers/{,**} wl,
++  audit deny @{HOME}/.pki/ w,
++  audit deny @{HOME}/.pki/nssdb/{,*.so{,.[0-9]*}} wl,
+ 
+   # don't allow reading/updating of run control files
+   deny @{HOME}/.*rc mrk,
+Index: apparmor-2.12/profiles/apparmor.d/abstractions/private-files-strict
+===================================================================
+--- apparmor-2.12.orig/profiles/apparmor.d/abstractions/private-files-strict
++++ apparmor-2.12/profiles/apparmor.d/abstractions/private-files-strict
+@@ -5,17 +5,20 @@
+   #include <abstractions/private-files>
+ 
+   # potentially extremely sensitive files
+-  audit deny @{HOME}/.gnupg/** mrwkl,
+-  audit deny @{HOME}/.ssh/** mrwkl,
+-  audit deny @{HOME}/.gnome2_private/** mrwkl,
+-  audit deny @{HOME}/.gnome2/keyrings/** mrwkl,
++  audit deny @{HOME}/.gnupg/{,**} mrwkl,
++  audit deny @{HOME}/.ssh/{,**} mrwkl,
++  audit deny @{HOME}/.gnome2_private/{,**} mrwkl,
++  audit deny @{HOME}/.gnome2/ w,
++  audit deny @{HOME}/.gnome2/keyrings/{,**} mrwkl,
+   # don't allow access to any gnome-keyring modules
+   audit deny /{,var/}run/user/[0-9]*/keyring** mrwkl,
+-  audit deny @{HOME}/.mozilla/** mrwkl,
+-  audit deny @{HOME}/.config/chromium/** mrwkl,
+-  audit deny @{HOME}/.{,mozilla-}thunderbird/** mrwkl,
+-  audit deny @{HOME}/.evolution/** mrwkl,
+-  audit deny @{HOME}/.config/evolution/** mrwkl,
+-  audit deny @{HOME}/.kde{,4}/share/apps/kmail{,2}/** mrwkl,
+-  audit deny @{HOME}/.kde{,4}/share/apps/kwallet/** mrwkl,
++  audit deny @{HOME}/.mozilla/{,**} mrwkl,
++  audit deny @{HOME}/.config/ w,
++  audit deny @{HOME}/.config/chromium/{,**} mrwkl,
++  audit deny @{HOME}/.config/evolution/{,**} mrwkl,
++  audit deny @{HOME}/.evolution/{,**} mrwkl,
++  audit deny @{HOME}/.{,mozilla-}thunderbird/{,**} mrwkl,
++  audit deny @{HOME}/.kde{,4}/{,share/,share/apps/} w,
++  audit deny @{HOME}/.kde{,4}/share/apps/kmail{,2}/{,**} mrwkl,
++  audit deny @{HOME}/.kde{,4}/share/apps/kwallet/{,**} mrwkl,
+ 
+Index: apparmor-2.12/profiles/apparmor.d/abstractions/ubuntu-browsers.d/user-files
+===================================================================
+--- apparmor-2.12.orig/profiles/apparmor.d/abstractions/ubuntu-browsers.d/user-files
++++ apparmor-2.12/profiles/apparmor.d/abstractions/ubuntu-browsers.d/user-files
+@@ -8,12 +8,13 @@
+ 
+   # Do not allow read and/or write to particularly sensitive/problematic files
+   #include <abstractions/private-files>
+-  audit deny @{HOME}/.ssh/** mrwkl,
+-  audit deny @{HOME}/.gnome2_private/** mrwkl,
+-  audit deny @{HOME}/.kde{,4}/share/apps/kwallet/** mrwkl,
++  audit deny @{HOME}/.ssh/{,**} mrwkl,
++  audit deny @{HOME}/.gnome2_private/{,**} mrwkl,
++  audit deny @{HOME}/.kde{,4}/{,share/,share/apps/} w,
++  audit deny @{HOME}/.kde{,4}/share/apps/kwallet/{,**} mrwkl,
+ 
+   # Comment this out if using gpg plugin/addons
+-  audit deny @{HOME}/.gnupg/** mrwkl,
++  audit deny @{HOME}/.gnupg/{,**} mrwkl,
+ 
+   # Allow read to all files user has DAC access to and write for files the user
+   # owns on removable media and filesystems.

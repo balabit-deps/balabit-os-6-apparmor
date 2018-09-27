@@ -50,3 +50,4 @@ r3558-tests-fix-exec_stack-errors-2.patch
 utils-add-aa-remove-unknown.patch
 0001-Allow-seven-digit-pid.patch
 base-journald-updates.patch
+lp1788929+1794848.patch

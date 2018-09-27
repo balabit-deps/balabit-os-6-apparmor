@@ -1,3 +1,11 @@
+apparmor (2.10.95-0ubuntu2.10) xenial-security; urgency=medium
+
+  * lp1788929+1794848.patch:
+    - disallow writes to thumbnailer dir (LP: #1788929)
+    - disallow access to the dirs of private files (LP: #1794848)
+
+ -- Jamie Strandboge <jamie@ubuntu.com>  Thu, 27 Sep 2018 18:23:46 +0000
+
 apparmor (2.10.95-0ubuntu2.9) xenial; urgency=medium
 
   * debian/patches/base-journald-updates.patch: update base abstraction
