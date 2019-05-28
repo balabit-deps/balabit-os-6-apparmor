@@ -1,0 +1,38 @@
+From 7a49f37c2481f761f8304712aa380acddfdb6303 Mon Sep 17 00:00:00 2001
+From: Christian Boltz <apparmor@cboltz.de>
+Date: Sun, 3 Dec 2017 14:39:46 +0100
+Subject: [PATCH] handle_children(): automatically add m permissions on ix
+ rules
+
+Since some kernel versions, inherit (ix) needs mmap permissions. Instead
+of annoying the user with an avoidable question after adding an ix rule,
+always add m permissions.
+
+Together with the already existing code, this means newly added inherit
+rules will now have 'mrix' permissions.
+
+Origin: backport, https://gitlab.com/apparmor/apparmor/commit/7a49f37c2481f761f8304712aa380acddfdb6303
+Bug-Ubuntu: https://launchpad.net/bugs/1830802
+---
+ utils/apparmor/aa.py | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/utils/apparmor/aa.py b/utils/apparmor/aa.py
+index 674459727ee0..1e7f4bba2849 100644
+--- a/utils/apparmor/aa.py
++++ b/utils/apparmor/aa.py
+@@ -1191,9 +1191,9 @@ def handle_children(profile, hat, root):
+ 
+                         regex_options = re.compile('CMD_(ix|px|cx|nx|pix|cix|nix)')
+                         if regex_options.search(ans):
+-                            # For inherit we need r
++                            # For inherit we need mr
+                             if exec_mode & str_to_mode('i'):
+-                                exec_mode |= str_to_mode('r')
++                                exec_mode |= str_to_mode('mr')
+                         else:
+                             if ans == 'CMD_DENY':
+                                 aa[profile][hat]['deny']['path'][exec_target]['mode'] = aa[profile][hat]['deny']['path'][exec_target].get('mode', str_to_mode('x')) | str_to_mode('x')
+-- 
+2.7.4
+

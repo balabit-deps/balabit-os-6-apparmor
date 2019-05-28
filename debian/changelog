@@ -1,3 +1,14 @@
+apparmor (2.10.95-0ubuntu2.11) xenial-security; urgency=medium
+
+  * Make dnsmasq profile and Python utility changes necessary to continue
+    working correctly after the Linux kernel change to address CVE-2019-11190.
+    Without these changes, some profile transitions may be unintentionally
+    denied. (LP: #1830802)
+    - 0001-dnsmasq-allow-libvirt_leaseshelper-m-permission-on-i.patch
+    - 0001-handle_children-automatically-add-m-permissions-on-i.patch
+
+ -- Tyler Hicks <tyhicks@canonical.com>  Tue, 28 May 2019 21:33:21 +0000
+
 apparmor (2.10.95-0ubuntu2.10) xenial-security; urgency=medium
 
   * lp1788929+1794848.patch:

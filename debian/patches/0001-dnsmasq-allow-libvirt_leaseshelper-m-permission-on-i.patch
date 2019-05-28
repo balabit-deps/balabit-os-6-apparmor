@@ -1,0 +1,30 @@
+From d8278f51ecb3c736d697fa367faf99457210a7d8 Mon Sep 17 00:00:00 2001
+From: intrigeri <intrigeri@boum.org>
+Date: Sun, 6 Nov 2016 10:48:34 +0100
+Subject: [PATCH] dnsmasq: allow libvirt_leaseshelper "m" permission on itself.
+
+Without this, on current Debian unstable, libvirt_leaseshelper crashes
+when dnsmasq starts it.
+
+Origin: upstream, https://gitlab.com/apparmor/apparmor/commit/d8278f51ecb3c736d697fa367faf99457210a7d8
+Bug-Ubuntu: https://launchpad.net/bugs/1830802
+---
+ profiles/apparmor.d/usr.sbin.dnsmasq | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/profiles/apparmor.d/usr.sbin.dnsmasq b/profiles/apparmor.d/usr.sbin.dnsmasq
+index a83fa94bf200..a53bf4e4cd97 100644
+--- a/profiles/apparmor.d/usr.sbin.dnsmasq
++++ b/profiles/apparmor.d/usr.sbin.dnsmasq
+@@ -92,6 +92,8 @@
+ 
+     /etc/libnl-3/classid r,
+ 
++    /usr/lib{,64}/libvirt/libvirt_leaseshelper m,
++
+     owner @{PROC}/@{pid}/net/psched r,
+     owner @{PROC}/@{pid}/status r,
+ 
+-- 
+2.7.4
+

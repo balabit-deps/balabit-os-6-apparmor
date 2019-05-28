@@ -43,6 +43,8 @@ r3498-r3499-ignore-net-events-that-look-like-file-events.patch
 r3505-tests-fix-stacking-mode-checks.patch
 r3509-tests-fix-exec_stack-errors-1.patch
 r3558-tests-fix-exec_stack-errors-2.patch
+0001-dnsmasq-allow-libvirt_leaseshelper-m-permission-on-i.patch
+0001-handle_children-automatically-add-m-permissions-on-i.patch
 
 #
 # Patches backported from upstream fix submissions
